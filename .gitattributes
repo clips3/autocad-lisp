@@ -1,0 +1,4 @@
+# These regression inputs are fingerprinted byte-for-byte in baseline.json.
+# Preserve their recorded line endings when cloning or switching branches.
+tests/pp_chlay/cases.json -text whitespace=cr-at-eol
+tests/pp_chlay/harness.lsp -text
