@@ -8,11 +8,18 @@ import unittest
 from unittest.mock import patch
 
 import run
+from expectations import expected_baseline
 from run import compare, parse_lisp, read_output
 from terminal import Terminal
 
 
 class DetectionTests(unittest.TestCase):
+    def test_lisp_structure_validation_ignores_strings_and_comments(self):
+        run.validate_lisp_forms(b'(princ "(escaped\\\"quote)") ; )\n(princ)', "test.lsp")
+        for data in (b'(princ', b'(princ))', b'(princ "unterminated)'):
+            with self.assertRaises(ValueError):
+                run.validate_lisp_forms(data, "test.lsp")
+
     def test_reads_native_strings_numbers_and_com_booleans(self):
         self.assertEqual(parse_lisp(r'("x" (nil T :vlax-true :vlax-false 1.2e-03 "A\"B"))'),
                          ["x", [None, True, True, False, 0.0012, 'A"B']])
@@ -103,7 +110,7 @@ class PresentationTests(unittest.TestCase):
 
 
 class CommandStatusTests(unittest.TestCase):
-    def invoke(self, actual_records, execution_error=None):
+    def invoke(self, actual_records, execution_error=None, contract_records=None):
         with tempfile.TemporaryDirectory() as folder:
             folder = Path(folder)
             baseline_path = folder / "baseline.json"
@@ -114,10 +121,17 @@ class CommandStatusTests(unittest.TestCase):
                 "harness_sha256": run.sha((run.HERE / "harness.lsp").read_bytes()),
             }
             baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+            expected_path = folder / "expected_changes.json"
+            expected_path.write_text(json.dumps({"baseline_source_sha256": "reference", "changes": []}), encoding="utf-8")
+            contract_names = json.loads((run.HERE / "contracts.json").read_text(encoding="utf-8"))
+            if contract_records is None:
+                contract_records = {"contracts/" + name: [True] for name in contract_names}
             result = {"records": actual_records, "environment": baseline["environment"],
-                      "source_sha256": "candidate", "timings_ms": {}, "elapsed_seconds": 1.0}
+                      "source_sha256": "candidate", "timings_ms": {}, "elapsed_seconds": 1.0,
+                      "contract_records": contract_records}
             stdout, stderr = io.StringIO(), io.StringIO()
-            args = ["run.py", "check", "--baseline", str(baseline_path), "--color", "never"]
+            args = ["run.py", "check", "--baseline", str(baseline_path),
+                    "--expected-changes", str(expected_path), "--color", "never"]
             with patch("sys.argv", args), patch("sys.stdout", stdout), patch("sys.stderr", stderr), \
                     patch("run.execute", return_value=(result, folder), side_effect=execution_error):
                 code = run.main()
@@ -144,6 +158,42 @@ class CommandStatusTests(unittest.TestCase):
         self.assertIn("[ERRO]", output)
         self.assertNotIn("[APROVADO]", output)
         self.assertIsNone(report)
+
+    def test_missing_contract_output_is_a_failure(self):
+        code, output, report = self.invoke({"clean/a": ["PP_LAYOUT"]}, contract_records={})
+        self.assertEqual(code, 1)
+        self.assertFalse(report["passed"])
+        self.assertTrue(any(d["path"].startswith("/contracts/") for d in report["differences"]))
+
+
+class ExpectedFixTests(unittest.TestCase):
+    def test_only_the_explicit_fix_is_accepted(self):
+        original = {"source_sha256": "original", "records": {"a": [1], "b": [2]}}
+        manifest = {"baseline_source_sha256": "original", "changes": [
+            {"key": "a", "before": [1], "after": [3], "reason": "intentional fix"}]}
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "fixes.json"
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            expected, reviewed = expected_baseline(original, path)
+        self.assertEqual(original["records"]["a"], [1])
+        self.assertEqual(len(reviewed), 1)
+        self.assertFalse(compare(expected["records"], {"a": [3], "b": [2]}))
+        self.assertTrue(compare(expected["records"], {"a": [3], "b": [99]}))
+
+    def test_stale_reference_or_duplicate_fix_cannot_be_accepted(self):
+        original = {"source_sha256": "original", "records": {"a": [1]}}
+        for manifest in (
+            {"baseline_source_sha256": "different", "changes": []},
+            {"baseline_source_sha256": "original", "changes": [
+                {"key": "a", "before": [99], "after": [3], "reason": "bad"}]},
+            {"baseline_source_sha256": "original", "changes": [
+                {"key": "a", "before": [1], "after": [3], "reason": "duplicate"}] * 2},
+        ):
+            with tempfile.TemporaryDirectory() as folder:
+                path = Path(folder) / "fixes.json"
+                path.write_text(json.dumps(manifest), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    expected_baseline(original, path)
 
 
 if __name__ == "__main__":

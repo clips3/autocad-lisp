@@ -52,6 +52,7 @@ GROUPS = (
     ("manual", "CHL - aplicação manual de camadas"),
     ("layers", "Propriedades das camadas PP"),
     ("hatches", "Hachuras, pilares e seleção"),
+    ("contracts", "Contratos das correções e dos índices"),
 )
 
 
@@ -116,6 +117,8 @@ class Terminal:
         self.line()
         self.line(f"  Registros verificados: {number(sum(counts.values()))}"
                   f"   |   Diferenças: {number(len(differences))}   |   Erros de execução: 0")
+        if result.get("intentional_changes"):
+            self.line(f"  Referência original + {len(result['intentional_changes'])} correções documentadas.")
         self.line()
         self.line(f"  {'GRUPO':<38} {'REGISTROS':>9}  RESULTADO", "dim")
         for key, label in GROUPS:
@@ -152,7 +155,9 @@ class Terminal:
         self.line("  Relatório detalhado:", "dim")
         self.line(f"  {Path(report_path)}")
         self.line()
-        self.line("  A aprovação compara com a referência, que inclui problemas já existentes.", "dim")
+        self.line("  A aprovação compara com a referência e as correções explicitamente documentadas."
+                  if result.get("intentional_changes") else
+                  "  A aprovação compara com a referência, que inclui problemas já existentes.", "dim")
         self.rule()
 
     def recorded(self, result, reference, path):

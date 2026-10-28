@@ -18,6 +18,7 @@ import sys
 import time
 
 from terminal import Terminal, configure_output, number, seconds
+from expectations import expected_baseline
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -27,6 +28,37 @@ BASELINE = HERE / "baseline.json"
 
 def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def validate_lisp_forms(data: bytes, name: str):
+    """Catch structural source errors before starting the expensive CAD process."""
+    depth, line = 0, 1
+    quoted = escaped = comment = False
+    for char in data.decode("utf-8-sig"):
+        if char == "\n":
+            line += 1
+            comment = False
+        if comment:
+            continue
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == ";":
+            comment = True
+        elif char == '"':
+            quoted = True
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth < 0:
+                raise ValueError(f"{name}: parêntese de fechamento inesperado na linha {line}.")
+    if depth or quoted:
+        raise ValueError(f"{name}: expressão ou string não fechada.")
 
 
 def lisp(value):
@@ -169,7 +201,19 @@ def execute(source: bytes, args, terminal=None) -> tuple[dict, Path]:
     folder.mkdir(parents=True)
     (folder / "source.lsp").write_bytes(source)
     harness = (HERE / "harness.lsp").read_bytes()
+    validate_lisp_forms(source, "PP_CHLAY.lsp")
+    validate_lisp_forms(harness, "harness.lsp")
     (folder / "harness.lsp").write_bytes(harness)
+    contracts_enabled = bool(getattr(args, "contracts", False))
+    if contracts_enabled:
+        contract_source = (HERE / "contracts.lsp").read_bytes()
+        validate_lisp_forms(contract_source, "contracts.lsp")
+        (folder / "contracts.lsp").write_bytes(contract_source)
+    benchmark_enabled = bool(getattr(args, "benchmark_hatches", False))
+    if benchmark_enabled:
+        benchmark_source = (HERE / "benchmark_hatches.lsp").read_bytes()
+        validate_lisp_forms(benchmark_source, "benchmark_hatches.lsp")
+        (folder / "benchmark_hatches.lsp").write_bytes(benchmark_source)
     cases_bytes = (HERE / "cases.json").read_bytes()
     cases = json.loads(cases_bytes)
     fixtures = "\n".join(f"(setq {symbol} '{lisp(cases[name])})" for symbol, name in (
@@ -177,17 +221,27 @@ def execute(source: bytes, args, terminal=None) -> tuple[dict, Path]:
         ("*pp-test-helpers*", "helpers"), ("*pp-test-manual*", "manual")))
     (folder / "fixtures.lsp").write_text(fixtures + "\n", encoding="utf-8-sig")
     output = folder / "actual.sexp"
+    contract_output = folder / "contracts.sexp"
+    benchmark_output = folder / "benchmark.sexp"
     # Trust ONLY this run's own directory while loading, and restore immediately.
     # No SECURELOAD change and no changes to any existing drawing/session.
     quoted_folder = lisp(folder.as_posix())
-    loads = " ".join(f"(load {lisp((folder / name).as_posix())})"
-                     for name in ("source.lsp", "harness.lsp", "fixtures.lsp"))
+    load_names = ["source.lsp", "harness.lsp", "fixtures.lsp"]
+    if contracts_enabled:
+        load_names.append("contracts.lsp")
+    if benchmark_enabled:
+        load_names.append("benchmark_hatches.lsp")
+    loads = " ".join(f"(load {lisp((folder / name).as_posix())})" for name in load_names)
     script = [
         '(setq pp-bootstrap-trusted (getvar "TRUSTEDPATHS"))',
         f'(setvar "TRUSTEDPATHS" (strcat pp-bootstrap-trusted ";" {quoted_folder}))',
         f"(setq pp-bootstrap-result (vl-catch-all-apply '(lambda () {loads})))",
         '(setvar "TRUSTEDPATHS" pp-bootstrap-trusted)',
         f'(if (vl-catch-all-error-p pp-bootstrap-result) (progn (setq pp-bootstrap-file (open {lisp(output.as_posix())} "w")) (prin1 (list "fatal" (vl-catch-all-error-message pp-bootstrap-result)) pp-bootstrap-file) (close pp-bootstrap-file)) (pp-test:run {lisp(output.as_posix())}))',
+        *([f'(if (not (vl-catch-all-error-p pp-bootstrap-result)) (pp-contract:run {lisp(contract_output.as_posix())}))']
+          if contracts_enabled else []),
+        *([f'(if (not (vl-catch-all-error-p pp-bootstrap-result)) (pp-benchmark:run {lisp(benchmark_output.as_posix())} {args.hatch_count}))']
+          if benchmark_enabled else []),
         '_.QUIT',
         '_N',
         '',
@@ -209,7 +263,11 @@ def execute(source: bytes, args, terminal=None) -> tuple[dict, Path]:
         while time.monotonic() - started < args.timeout:
             if output.exists():
                 text = output.read_text(encoding="utf-8-sig", errors="replace")
-                if '("complete" T)' in text or '("fatal" ' in text:
+                contract_text = contract_output.read_text(encoding="utf-8-sig", errors="replace") if contract_output.exists() else ""
+                contract_done = not contracts_enabled or '("complete" T)' in contract_text or '("fatal" ' in contract_text
+                benchmark_text = benchmark_output.read_text(encoding="utf-8-sig", errors="replace") if benchmark_output.exists() else ""
+                benchmark_done = not benchmark_enabled or '("complete" T)' in benchmark_text or '("fatal" ' in benchmark_text
+                if '("fatal" ' in text or ('("complete" T)' in text and contract_done and benchmark_done):
                     completed = True
                     break
             if process.poll() is not None:
@@ -224,6 +282,15 @@ def execute(source: bytes, args, terminal=None) -> tuple[dict, Path]:
         # The completion record is written just before closing the stream.
         time.sleep(1)
         result = read_output(output)
+        if contracts_enabled:
+            contract_result = read_output(contract_output)
+            result["contract_records"] = {key: value for key, value in contract_result["records"].items()
+                                          if key.startswith("contracts/")}
+            result["contracts_sha256"] = sha((HERE / "contracts.lsp").read_bytes())
+        if benchmark_enabled:
+            benchmark_result = read_output(benchmark_output)
+            result["benchmark_records"] = benchmark_result["records"]
+            result["timings_ms"].update(benchmark_result["timings_ms"])
     finally:
         try:
             process.wait(timeout=6)
@@ -246,12 +313,15 @@ def main() -> int:
     parser.add_argument("--ref", default=REFERENCE, help="Frozen git reference used only by record")
     parser.add_argument("--baseline", type=Path, default=BASELINE)
     parser.add_argument("--replace-baseline", action="store_true")
+    parser.add_argument("--expected-changes", type=Path, default=HERE / "expected_changes.json",
+                        help="Correções explícitas verificadas além da referência original")
     parser.add_argument("--acad")
     parser.add_argument("--template")
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument("--color", choices=("auto", "always", "never"), default="auto",
                         help="Cores no terminal: auto (padrão), always ou never")
     args = parser.parse_args()
+    args.contracts = args.mode == "check"
     terminal = Terminal(args.color)
     terminal.heading("CAPTURA DA REFERÊNCIA" if args.mode == "record" else "TESTES DE REGRESSÃO")
     try:
@@ -281,19 +351,28 @@ def main() -> int:
             if baseline[field] != sha((HERE / filename).read_bytes()):
                 raise RuntimeError(f"{filename} mudou desde a captura da referência. "
                                    "Revise os testes e capture novamente o commit de referência.")
+        expected, reviewed = expected_baseline(baseline, args.expected_changes)
         result, folder = execute(args.source.read_bytes(), args, terminal)
         if result["environment"] != baseline["environment"]:
             raise RuntimeError(f"AutoCAD/LISPSYS diferente da referência: "
                                f"{baseline['environment']} -> {result['environment']}")
         terminal.activity("Comparando os resultados com a referência...")
-        changes = compare(baseline["records"], result["records"])
+        contract_names = json.loads((HERE / "contracts.json").read_text(encoding="utf-8"))
+        if not contract_names or len(set(contract_names)) != len(contract_names):
+            raise ValueError("Lista de contratos de regressão vazia ou duplicada.")
+        for name in contract_names:
+            expected["records"]["contracts/" + name] = [True]
+        result["records"].update(result.get("contract_records", {}))
+        result["intentional_changes"] = reviewed
+        changes = compare(expected["records"], result["records"])
         report = {"passed": not changes, "differences": changes,
                   "baseline_source_sha256": baseline["source_sha256"],
                   "candidate_source_sha256": result["source_sha256"],
-                  "timings_ms": result["timings_ms"]}
+                  "timings_ms": result["timings_ms"], "intentional_changes": reviewed,
+                  "contract_count": len(contract_names)}
         report_path = folder / "comparison.json"
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        terminal.summary(baseline, result, changes, report_path)
+        terminal.summary(expected, result, changes, report_path)
         return 1 if changes else 0
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
         Terminal(args.color, stream=sys.stderr).error(error)

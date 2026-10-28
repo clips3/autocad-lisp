@@ -1,0 +1,1079 @@
+{
+  "baseline_source_sha256": "07063ea3da63b776d47f0c292f2562f732e2e4d7c6b86bf57c527da7fa5132d2",
+  "changes": [
+    {
+      "key": "clean/matrix-08-POLY_OPEN",
+      "reason": "Fechar a polilinha com DXF atualizado preserva a nova camada PP_PILAR e as propriedades ByLayer.",
+      "before": [
+        {
+          "type": [
+            "LWPOLYLINE"
+          ],
+          "layer": [
+            "S-COLS"
+          ],
+          "color": [
+            3
+          ],
+          "linetype": [
+            "Continuous"
+          ],
+          "linetype_scale": [
+            2.0
+          ],
+          "lineweight": [
+            25
+          ],
+          "transparency": null,
+          "flags": [
+            1
+          ],
+          "pattern": null,
+          "pattern_scale_dxf": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "pattern_angle_dxf": null,
+          "vertices": [
+            [
+              5790.0,
+              0.0
+            ],
+            [
+              5792.0,
+              0.0
+            ],
+            [
+              5792.0,
+              3.0
+            ],
+            [
+              5790.0,
+              3.0
+            ]
+          ],
+          "endpoint": null,
+          "elevation": [
+            0.0
+          ],
+          "thickness": [
+            0.0
+          ],
+          "normal": [
+            [
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "paperspace": [
+            0
+          ],
+          "layout": [
+            "Model"
+          ]
+        }
+      ],
+      "after": [
+        {
+          "type": [
+            "LWPOLYLINE"
+          ],
+          "layer": [
+            "PP_PILAR"
+          ],
+          "color": null,
+          "linetype": null,
+          "linetype_scale": null,
+          "lineweight": null,
+          "transparency": null,
+          "flags": [
+            1
+          ],
+          "pattern": null,
+          "pattern_scale_dxf": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "pattern_angle_dxf": null,
+          "vertices": [
+            [
+              5790.0,
+              0.0
+            ],
+            [
+              5792.0,
+              0.0
+            ],
+            [
+              5792.0,
+              3.0
+            ],
+            [
+              5790.0,
+              3.0
+            ]
+          ],
+          "endpoint": null,
+          "elevation": [
+            0.0
+          ],
+          "thickness": [
+            0.0
+          ],
+          "normal": [
+            [
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "paperspace": [
+            0
+          ],
+          "layout": [
+            "Model"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "hatch-command/outside-selection",
+      "reason": "A hachura fora da seleção mantém seu padrão SOLID original, sem ser padronizada pelo CHLHATCH.",
+      "before": [
+        {
+          "type": [
+            "HATCH"
+          ],
+          "layer": [
+            "PP_ARQUITETURA"
+          ],
+          "color": [
+            3
+          ],
+          "linetype": [
+            "Continuous"
+          ],
+          "linetype_scale": [
+            2.0
+          ],
+          "lineweight": [
+            25
+          ],
+          "transparency": null,
+          "flags": [
+            0
+          ],
+          "pattern": [
+            "ANSI31"
+          ],
+          "pattern_scale_dxf": [
+            0.02
+          ],
+          "pattern_angle_dxf": [
+            0.0
+          ],
+          "vertices": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              200.0,
+              0.0,
+              0.0
+            ],
+            [
+              202.0,
+              0.0,
+              0.0
+            ],
+            [
+              202.0,
+              3.0,
+              0.0
+            ],
+            [
+              200.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "endpoint": [
+            [
+              202.0,
+              0.0,
+              0.0
+            ],
+            [
+              202.0,
+              3.0,
+              0.0
+            ],
+            [
+              200.0,
+              3.0,
+              0.0
+            ],
+            [
+              200.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "elevation": null,
+          "thickness": null,
+          "normal": [
+            [
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "paperspace": [
+            0
+          ],
+          "layout": [
+            "Model"
+          ],
+          "hatch": {
+            "pattern": "ANSI31",
+            "scale": 0.02,
+            "angle": 0.0,
+            "area": 6.0
+          }
+        }
+      ],
+      "after": [
+        {
+          "type": [
+            "HATCH"
+          ],
+          "layer": [
+            "PP_ARQUITETURA"
+          ],
+          "color": [
+            3
+          ],
+          "linetype": [
+            "Continuous"
+          ],
+          "linetype_scale": [
+            2.0
+          ],
+          "lineweight": [
+            25
+          ],
+          "transparency": null,
+          "flags": [
+            1
+          ],
+          "pattern": [
+            "SOLID"
+          ],
+          "pattern_scale_dxf": null,
+          "pattern_angle_dxf": null,
+          "vertices": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              200.0,
+              0.0,
+              0.0
+            ],
+            [
+              202.0,
+              0.0,
+              0.0
+            ],
+            [
+              202.0,
+              3.0,
+              0.0
+            ],
+            [
+              200.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "endpoint": [
+            [
+              202.0,
+              0.0,
+              0.0
+            ],
+            [
+              202.0,
+              3.0,
+              0.0
+            ],
+            [
+              200.0,
+              3.0,
+              0.0
+            ],
+            [
+              200.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "elevation": null,
+          "thickness": null,
+          "normal": [
+            [
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "paperspace": [
+            0
+          ],
+          "layout": [
+            "Model"
+          ],
+          "hatch": {
+            "pattern": "SOLID",
+            "scale": 1.0,
+            "angle": 0.0,
+            "area": 6.0
+          }
+        }
+      ]
+    },
+    {
+      "key": "pillar-twice/repeat-hatch",
+      "reason": "Formatar novamente o mesmo pilar preserva exatamente o par SOLID e ANSI37, sem criar uma terceira hachura.",
+      "before": [
+        {
+          "type": [
+            "HATCH"
+          ],
+          "layer": [
+            "PP_PILAR"
+          ],
+          "color": null,
+          "linetype": null,
+          "linetype_scale": null,
+          "lineweight": null,
+          "transparency": [
+            33554483
+          ],
+          "flags": [
+            1
+          ],
+          "pattern": [
+            "SOLID"
+          ],
+          "pattern_scale_dxf": null,
+          "pattern_angle_dxf": null,
+          "vertices": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              2.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "endpoint": [
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              2.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "elevation": null,
+          "thickness": null,
+          "normal": [
+            [
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "paperspace": [
+            0
+          ],
+          "layout": [
+            "Model"
+          ],
+          "hatch": {
+            "pattern": "SOLID",
+            "scale": 1.0,
+            "angle": 0.0,
+            "area": 6.0
+          }
+        },
+        {
+          "type": [
+            "HATCH"
+          ],
+          "layer": [
+            "PP_PILAR"
+          ],
+          "color": null,
+          "linetype": null,
+          "linetype_scale": null,
+          "lineweight": null,
+          "transparency": [
+            33554686
+          ],
+          "flags": [
+            0
+          ],
+          "pattern": [
+            "ANSI37"
+          ],
+          "pattern_scale_dxf": [
+            0.03
+          ],
+          "pattern_angle_dxf": [
+            0.0
+          ],
+          "vertices": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              2.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "endpoint": [
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              2.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "elevation": null,
+          "thickness": null,
+          "normal": [
+            [
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "paperspace": [
+            0
+          ],
+          "layout": [
+            "Model"
+          ],
+          "hatch": {
+            "pattern": "ANSI37",
+            "scale": 0.03,
+            "angle": 0.0,
+            "area": 6.0
+          }
+        },
+        {
+          "type": [
+            "HATCH"
+          ],
+          "layer": [
+            "PP_PILAR"
+          ],
+          "color": null,
+          "linetype": null,
+          "linetype_scale": null,
+          "lineweight": null,
+          "transparency": [
+            33554686
+          ],
+          "flags": [
+            0
+          ],
+          "pattern": [
+            "ANSI37"
+          ],
+          "pattern_scale_dxf": [
+            0.03
+          ],
+          "pattern_angle_dxf": [
+            0.0
+          ],
+          "vertices": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              2.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "endpoint": [
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              2.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "elevation": null,
+          "thickness": null,
+          "normal": [
+            [
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "paperspace": [
+            0
+          ],
+          "layout": [
+            "Model"
+          ],
+          "hatch": {
+            "pattern": "ANSI37",
+            "scale": 0.03,
+            "angle": 0.0,
+            "area": 6.0
+          }
+        }
+      ],
+      "after": [
+        {
+          "type": [
+            "HATCH"
+          ],
+          "layer": [
+            "PP_PILAR"
+          ],
+          "color": null,
+          "linetype": null,
+          "linetype_scale": null,
+          "lineweight": null,
+          "transparency": [
+            33554483
+          ],
+          "flags": [
+            1
+          ],
+          "pattern": [
+            "SOLID"
+          ],
+          "pattern_scale_dxf": null,
+          "pattern_angle_dxf": null,
+          "vertices": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              2.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "endpoint": [
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              2.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "elevation": null,
+          "thickness": null,
+          "normal": [
+            [
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "paperspace": [
+            0
+          ],
+          "layout": [
+            "Model"
+          ],
+          "hatch": {
+            "pattern": "SOLID",
+            "scale": 1.0,
+            "angle": 0.0,
+            "area": 6.0
+          }
+        },
+        {
+          "type": [
+            "HATCH"
+          ],
+          "layer": [
+            "PP_PILAR"
+          ],
+          "color": null,
+          "linetype": null,
+          "linetype_scale": null,
+          "lineweight": null,
+          "transparency": [
+            33554686
+          ],
+          "flags": [
+            0
+          ],
+          "pattern": [
+            "ANSI37"
+          ],
+          "pattern_scale_dxf": [
+            0.03
+          ],
+          "pattern_angle_dxf": [
+            0.0
+          ],
+          "vertices": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              2.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "endpoint": [
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              2.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "elevation": null,
+          "thickness": null,
+          "normal": [
+            [
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "paperspace": [
+            0
+          ],
+          "layout": [
+            "Model"
+          ],
+          "hatch": {
+            "pattern": "ANSI37",
+            "scale": 0.03,
+            "angle": 0.0,
+            "area": 6.0
+          }
+        }
+      ]
+    },
+    {
+      "key": "manual/PP_VEGETACAO/HATCH",
+      "reason": "Hachuras transferidas para PP_VEGETACAO sao padronizadas com padrao GRASS e escala 0.01.",
+      "before": [
+        {
+          "type": [
+            "HATCH"
+          ],
+          "layer": [
+            "PP_VEGETAÇÃO"
+          ],
+          "color": null,
+          "linetype": null,
+          "linetype_scale": null,
+          "lineweight": null,
+          "transparency": null,
+          "flags": [
+            1
+          ],
+          "pattern": [
+            "SOLID"
+          ],
+          "pattern_scale_dxf": null,
+          "pattern_angle_dxf": null,
+          "vertices": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              50.0,
+              0.0,
+              0.0
+            ],
+            [
+              52.0,
+              0.0,
+              0.0
+            ],
+            [
+              52.0,
+              3.0,
+              0.0
+            ],
+            [
+              50.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "endpoint": [
+            [
+              52.0,
+              0.0,
+              0.0
+            ],
+            [
+              52.0,
+              3.0,
+              0.0
+            ],
+            [
+              50.0,
+              3.0,
+              0.0
+            ],
+            [
+              50.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "elevation": null,
+          "thickness": null,
+          "normal": [
+            [
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "paperspace": [
+            0
+          ],
+          "layout": [
+            "Model"
+          ],
+          "hatch": {
+            "pattern": "SOLID",
+            "scale": 1.0,
+            "angle": 0.0,
+            "area": 6.0
+          }
+        }
+      ],
+      "after": [
+        {
+          "type": [
+            "HATCH"
+          ],
+          "layer": [
+            "PP_VEGETAÇÃO"
+          ],
+          "color": null,
+          "linetype": null,
+          "linetype_scale": null,
+          "lineweight": null,
+          "transparency": null,
+          "flags": [
+            0
+          ],
+          "pattern": [
+            "GRASS"
+          ],
+          "pattern_scale_dxf": [
+            0.01
+          ],
+          "pattern_angle_dxf": [
+            0.0
+          ],
+          "vertices": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              50.0,
+              0.0,
+              0.0
+            ],
+            [
+              52.0,
+              0.0,
+              0.0
+            ],
+            [
+              52.0,
+              3.0,
+              0.0
+            ],
+            [
+              50.0,
+              3.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "endpoint": [
+            [
+              52.0,
+              0.0,
+              0.0
+            ],
+            [
+              52.0,
+              3.0,
+              0.0
+            ],
+            [
+              50.0,
+              3.0,
+              0.0
+            ],
+            [
+              50.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "elevation": null,
+          "thickness": null,
+          "normal": [
+            [
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "paperspace": [
+            0
+          ],
+          "layout": [
+            "Model"
+          ],
+          "hatch": {
+            "pattern": "GRASS",
+            "scale": 0.01,
+            "angle": 0.0,
+            "area": 6.0
+          }
+        }
+      ]
+    }
+  ]
+}

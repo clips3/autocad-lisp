@@ -106,7 +106,7 @@ atributos, cotas, proxies, camadas bloqueadas, vínculos XREF reais, cancelament
 por ESC, UNDO, sequência visual de draw order ou toda a geometria de hachuras.
 Ela deve ser ampliada com cenários dos arquivos reais à medida que forem relevantes.
 
-## Validação do próprio harness
+## Validação do próprio harness e contratos
 
 Testes rápidos do parser e do comparador:
 
@@ -123,3 +123,13 @@ python tests/pp_chlay/verify_detection.py
 Essa prova injeta três mudanças: destino de `NOMEPILAR`, exclusão desativada e
 cor explícita no lugar de ByLayer. Só passa quando as três alterações são
 detectadas. Ela não modifica o fonte de produção nem a referência.
+
+## Benchmark de desempenho
+
+Para comparar a performance da rotina refatorada contra a versão original congelada no commit de referência:
+
+```powershell
+python tests/pp_chlay/benchmark.py --runs 3 --hatches 500
+```
+
+Ele executa os comandos `CHLAUTO`, `CHLDEL` e rotinas de hachura repetida no AutoCAD em instâncias controladas, calculando a mediana e a taxa de redução de tempo.

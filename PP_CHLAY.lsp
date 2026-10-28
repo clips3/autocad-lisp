@@ -1,4 +1,7 @@
-;; Função auxiliar: normalização de strings (remove acentos e converte para maiúsculas)
+;; PP_CHLAY - regras compartilhadas, processamento em lote e hachuras por contorno.
+(vl-load-com)
+
+
 (defun chlay:norm-str (s)
   (if (and s (= (type s) 'STR))
     (strcase (vl-string-translate "áàãâéêíóõôúçÁÀÃÂÉÊÍÓÕÔÚÇ"
@@ -8,46 +11,13 @@
   )
 )
 
-;; Função auxiliar: busca case-insensitive e tolerante a acentos na lista de layers
-(defun chlay:find-layer (name lst / item result target-norm test-norm)
-  (if (and name (= (type name) 'STR))
-    (progn
-      (setq target-norm (chlay:norm-str name))
-      ;; 1. Busca exata case-insensitive
-      (foreach item lst
-        (if (not result)
-          (if (= (strcase (car item)) (strcase name))
-            (setq result item)
-          )
-        )
-      )
-      ;; 2. Busca tolerante a acentos
-      (if (not result)
-        (foreach item lst
-          (if (not result)
-            (progn
-              (setq test-norm (chlay:norm-str (car item)))
-              (if (or (= test-norm target-norm)
-                      (wcmatch (strcase name) (strcase (car item)))
-                      (wcmatch target-norm test-norm)
-                  )
-                (setq result item)
-              )
-            )
-          )
-        )
-      )
-    )
-  )
-  result
-)
-
-;; Retorna a lista completa de definições de camadas padrão com propriedades originais do CHL
 (defun chlay:get-predefined-layers ()
   (list 
     (cons "PP_LAYOUT" 
           '((62 . 253)
             (6 . "Continuous")
+            ("HatchPattern" . "ANSI37")
+            ("HatchScale" . 0.02)
            )
     )
     (cons "PP_ARQUITETURA" 
@@ -86,7 +56,13 @@
             ("HatchScale" . 0.03)
            )
     )
-    (cons "PP_PROJEÇÃO" '((62 . 253) (6 . "DASHED")))
+    (cons "PP_PROJEÇÃO" 
+          '((62 . 253)
+            (6 . "DASHED")
+            ("HatchPattern" . "ANSI31")
+            ("HatchScale" . 0.1)
+           )
+    )
     (cons "PP_REGIÃO" '((62 . 12) (6 . "PHANTOM2")))
     (cons "PP_TAG" '((62 . 7) (6 . "Continuous")))
     (cons "PP_TAG COLUNA" '((62 . 7) (6 . "Continuous")))
@@ -103,7 +79,7 @@
           '((62 . 254)
             (6 . "Continuous")
             ("HatchPattern" . "GRASS")
-            ("HatchScale" . 0.002)
+            ("HatchScale" . 0.01)
            )
     )
     (cons "PP_VIGA" '((62 . 30) (6 . "DASHED")))
@@ -115,884 +91,10 @@
   )
 )
 
-;; Garante e REAFIRMA que TODAS as camadas do padrão PP existam e tenham suas propriedades corretas (Cores, Tipos de Linha e Plotabilidade)
-(defun chlay:ensure-all-predefined-layers (/ doc layers ltypes predefined_layers lay_item 
-                                             lay_name props lay_color lay_ltype lay_plot lay_obj
-                                            )
-  (vl-load-com)
-  (setq doc (vla-get-activedocument (vlax-get-acad-object)))
-  (setq layers (vla-get-layers doc))
-  (setq ltypes (vla-get-linetypes doc))
-  (setq predefined_layers (chlay:get-predefined-layers))
+(setq *chlay-layer-definitions* (chlay:get-predefined-layers))
+(defun chlay:get-predefined-layers () *chlay-layer-definitions*)
 
-  (foreach lay_item predefined_layers
-    (setq lay_name (car lay_item))
-    (setq props (cdr lay_item))
-    (setq lay_color (cdr (assoc 62 props)))
-    (setq lay_ltype (cdr (assoc 6 props)))
-    (setq lay_plot (cdr (assoc "Plot" props)))
-
-    ;; 1. Obter ou criar a camada
-    (setq lay_obj (vl-catch-all-apply 'vla-add (list layers lay_name)))
-
-    (if (and lay_obj (not (vl-catch-all-error-p lay_obj)))
-      (progn
-        ;; 2. Reafirmar e forçar a cor padrão da camada
-        (if lay_color
-          (vl-catch-all-apply '(lambda () (vla-put-color lay_obj lay_color)))
-        )
-
-        ;; 3. Carregar e reafirmar o tipo de linha padrão da camada
-        (if (and lay_ltype (/= (strcase lay_ltype) "CONTINUOUS"))
-          (progn
-            (if (not (tblsearch "LTYPE" lay_ltype))
-              (progn
-                (vl-catch-all-apply '(lambda () (vla-load ltypes lay_ltype "acadiso.lin")))
-                (if (not (tblsearch "LTYPE" lay_ltype))
-                  (vl-catch-all-apply '(lambda () (vla-load ltypes lay_ltype "acad.lin")))
-                )
-              )
-            )
-            (if (tblsearch "LTYPE" lay_ltype)
-              (vl-catch-all-apply '(lambda () (vla-put-linetype lay_obj lay_ltype)))
-            )
-          )
-          (vl-catch-all-apply '(lambda () (vla-put-linetype lay_obj "Continuous")))
-        )
-
-        ;; 4. Reafirmar se a camada é plotável ou não
-        (if (and lay_plot (= (strcase lay_plot) "NO"))
-          (vl-catch-all-apply '(lambda () (vla-put-plottable lay_obj :vlax-false)))
-          (vl-catch-all-apply '(lambda () (vla-put-plottable lay_obj :vlax-true)))
-        )
-      )
-    )
-  )
-  ;; Padronizar LTSCALE em 0.03 e restaurar camada ativa para "0" se existir
-  (vl-catch-all-apply '(lambda () (setvar "LTSCALE" 0.03)))
-  (if (tblsearch "LAYER" "0")
-    (vl-catch-all-apply '(lambda () (setvar "CLAYER" "0")))
-  )
-  (princ)
-)
-
-;; Aplica transparência diretamente via DXF 440 e VLA (sem chamadas ao CHPROP)
-(defun chlay:set-transparency (ent val / vla-obj elist alpha dxf440 val_str val_int)
-  (if (and ent (setq elist (entget ent)))
-    (progn
-      (setq val_int (if (numberp val) val (atoi (vl-princ-to-string (if val val 0)))))
-      (setq val_str (itoa val_int))
-      (setq vla-obj (vlax-ename->vla-object ent))
-
-      ;; 1. Aplicação via DXF Group 440 (Fórmula oficial: 33554432 + Alpha_Byte)
-      (if (and (>= val_int 0) (<= val_int 90))
-        (progn
-          (setq alpha (fix (* (- 100 val_int) 2.55)))
-          (setq dxf440 (+ 33554432 alpha))
-          (if (assoc 440 elist)
-            (entmod (subst (cons 440 dxf440) (assoc 440 elist) elist))
-            (entmod (append elist (list (cons 440 dxf440))))
-          )
-          (entupd ent)
-        )
-      )
-
-      ;; 2. Aplicação via VLA ActiveX
-      (vl-catch-all-apply '(lambda () (vla-put-Transparency vla-obj val_str)))
-    )
-  )
-)
-
-;; Calcula a assinatura geométrica espacial de uma hachura (BoundingBox + Centroide + Área)
-(defun chlay:get-hatch-sig (ent / vla-obj minPt maxPt min_pt max_pt area min_x min_y max_x max_y cen_x cen_y)
-  (if (and ent (entget ent) (= (cdr (assoc 0 (entget ent))) "HATCH"))
-    (progn
-      (setq vla-obj (vlax-ename->vla-object ent))
-      (setq minPt nil maxPt nil)
-      (vl-catch-all-apply 'vla-GetBoundingBox (list vla-obj 'minPt 'maxPt))
-      (if (and minPt maxPt)
-        (progn
-          (setq min_pt (vlax-safearray->list minPt))
-          (setq max_pt (vlax-safearray->list maxPt))
-          (setq area (vl-catch-all-apply 'vla-get-Area (list vla-obj)))
-          (if (or (vl-catch-all-error-p area) (not (numberp area)))
-            (setq area 0.0)
-          )
-          (setq min_x (car min_pt) min_y (cadr min_pt))
-          (setq max_x (car max_pt) max_y (cadr max_pt))
-          (setq cen_x (/ (+ min_x max_x) 2.0))
-          (setq cen_y (/ (+ min_y max_y) 2.0))
-          (strcat (rtos min_x 2 2) "_" 
-                  (rtos min_y 2 2) "_" 
-                  (rtos max_x 2 2) "_" 
-                  (rtos max_y 2 2) "_" 
-                  (rtos cen_x 2 2) "_" 
-                  (rtos cen_y 2 2) "_" 
-                  (rtos area 2 2)
-          )
-        )
-        nil
-      )
-    )
-    nil
-  )
-)
-
-;; Calcula a assinatura geométrica espacial de uma polilinha (BoundingBox + Centroide + Área)
-(defun chlay:get-pline-sig (ent / vla-obj minPt maxPt min_pt max_pt area min_x min_y max_x max_y cen_x cen_y)
-  (if (and ent (entget ent))
-    (progn
-      (setq vla-obj (vlax-ename->vla-object ent))
-      (setq minPt nil maxPt nil)
-      (vl-catch-all-apply 'vla-GetBoundingBox (list vla-obj 'minPt 'maxPt))
-      (if (and minPt maxPt)
-        (progn
-          (setq min_pt (vlax-safearray->list minPt))
-          (setq max_pt (vlax-safearray->list maxPt))
-          (setq area (vl-catch-all-apply 'vla-get-Area (list vla-obj)))
-          (if (or (vl-catch-all-error-p area) (not (numberp area)))
-            (setq area 0.0)
-          )
-          (setq min_x (car min_pt) min_y (cadr min_pt))
-          (setq max_x (car max_pt) max_y (cadr max_pt))
-          (setq cen_x (/ (+ min_x max_x) 2.0))
-          (setq cen_y (/ (+ min_y max_y) 2.0))
-          (strcat (rtos min_x 2 2) "_" 
-                  (rtos min_y 2 2) "_" 
-                  (rtos max_x 2 2) "_" 
-                  (rtos max_y 2 2) "_" 
-                  (rtos cen_x 2 2) "_" 
-                  (rtos cen_y 2 2) "_" 
-                  (rtos area 2 2)
-          )
-        )
-        nil
-      )
-    )
-    nil
-  )
-)
-
-;; Formatação exata de Hachuras (Cria o par SOLID 80 + ANSI37 no topo para PP_PILAR ou aplica padrão da camada)
-(defun chlay:format-hatch (ent lay_name / vla-obj predefined_layers lay_def props 
-                                          hatch_pattern hatch_scale hatch_transparency 
-                                          is_pilar vla-obj-copy none_color ent_name
-                          )
-  (if (and ent (entget ent) (= (cdr (assoc 0 (entget ent))) "HATCH"))
-    (progn
-      (setq vla-obj (vlax-ename->vla-object ent))
-      (setq ent_name ent)
-      (setq predefined_layers (chlay:get-predefined-layers))
-      (setq lay_def (chlay:find-layer lay_name predefined_layers))
-
-      (if lay_def
-        (progn
-          (setq props (cdr lay_def))
-          (setq hatch_pattern (cdr (assoc "HatchPattern" props)))
-          (setq hatch_scale (cdr (assoc "HatchScale" props)))
-          (setq hatch_transparency (cdr (assoc "HatchTransparency" props)))
-
-          (if (not hatch_pattern) (setq hatch_pattern "SOLID"))
-          (setq is_pilar (= (strcase lay_name) "PP_PILAR"))
-
-          (if is_pilar
-            (progn
-              ;; 1. Hachura de fundo: SOLID com transparência 80
-              (vl-catch-all-apply
-                '(lambda ()
-                   (vla-SetPattern vla-obj 1 "SOLID")
-                   (vla-put-PatternAngle vla-obj 0.0)
-                   (vla-evaluate vla-obj)
-                 )
-              )
-              (chlay:set-transparency ent_name 80)
-
-              ;; Remover cor de fundo do SOLID
-              (vl-catch-all-apply
-                '(lambda ()
-                   (setq none_color (vla-get-backgroundcolor vla-obj))
-                   (if (and none_color (not (vl-catch-all-error-p none_color)))
-                     (progn
-                       (vla-put-entitycolor none_color -939524096)
-                       (vla-put-backgroundcolor vla-obj none_color)
-                     )
-                   )
-                 )
-              )
-
-              ;; 2. Hachura no topo: ANSI37 (Copiada DEPOIS, ficando nativamente POR CIMA)
-              (setq vla-obj-copy (vl-catch-all-apply 'vla-Copy (list vla-obj)))
-              (if (and vla-obj-copy (not (vl-catch-all-error-p vla-obj-copy)))
-                (progn
-                  (vl-catch-all-apply
-                    '(lambda ()
-                       (vla-SetPattern vla-obj-copy 1 (if hatch_pattern hatch_pattern "ANSI37"))
-                       (vla-put-PatternAngle vla-obj-copy 0.0)
-                       (vla-put-PatternScale vla-obj-copy (if (numberp hatch_scale) hatch_scale 0.03))
-                       (vla-evaluate vla-obj-copy)
-                     )
-                  )
-                  (chlay:set-transparency (vlax-vla-object->ename vla-obj-copy) 0)
-
-                  ;; Remover cor de fundo da hachura do topo
-                  (vl-catch-all-apply
-                    '(lambda ()
-                       (setq none_color (vla-get-backgroundcolor vla-obj-copy))
-                       (if (and none_color (not (vl-catch-all-error-p none_color)))
-                         (progn
-                           (vla-put-entitycolor none_color -939524096)
-                           (vla-put-backgroundcolor vla-obj-copy none_color)
-                         )
-                       )
-                     )
-                  )
-                )
-              )
-            )
-            (progn
-              ;; Comportamento Padrão para outras camadas
-              (vl-catch-all-apply
-                '(lambda ()
-                   (vla-SetPattern vla-obj 1 hatch_pattern)
-                   (vla-put-PatternAngle vla-obj 0.0)
-                   (if (and hatch_scale (numberp hatch_scale)) (vla-put-PatternScale vla-obj hatch_scale))
-                   (vla-evaluate vla-obj)
-                 )
-              )
-
-              ;; Remover cor de fundo (None = -939524096)
-              (vl-catch-all-apply
-                '(lambda ()
-                   (setq none_color (vla-get-backgroundcolor vla-obj))
-                   (if (and none_color (not (vl-catch-all-error-p none_color)))
-                     (progn
-                       (vla-put-entitycolor none_color -939524096)
-                       (vla-put-backgroundcolor vla-obj none_color)
-                     )
-                   )
-                 )
-              )
-
-              ;; Aplicar transparência se definida no cadastro
-              (if hatch_transparency
-                (chlay:set-transparency ent_name hatch_transparency)
-              )
-            )
-          )
-        )
-      )
-    )
-  )
-)
-
-;; Deduplica hachuras sobrepostas:
-;; Para PP_PILAR: garante exatamente 2 hachuras (SOLID transp 80 por baixo e ANSI37 por cima) e DELETA todas as excedentes.
-;; Para outras camadas: garante exatamente 1 hachura padronizada por local e DELETA duplicatas.
-(defun chlay:deduplicate-hatches (target_layer / ss i ent elist lay sig groups 
-                                                 group_key item group_ents lay_name 
-                                                 is_pilar del_count h_solid h_ansi 
-                                                 vla_solid vla_ansi h_extra vla_extra
-                                                 props hatch_pattern hatch_scale 
-                                                 hatch_transparency predefined_layers lay_def
-                                                 none_color filter_list
-                                 )
-  (vl-load-com)
-  (setq del_count 0)
-  (setq predefined_layers (chlay:get-predefined-layers))
-
-  ;; Montar filtro de seleção de hachuras
-  (if (and target_layer (/= target_layer ""))
-    (setq filter_list (list '(0 . "HATCH") (cons 8 target_layer)))
-    (setq filter_list '((0 . "HATCH") (8 . "PP_*")))
-  )
-
-  (setq ss (ssget "_X" filter_list))
-  (if ss
-    (progn
-      (setq groups nil)
-      (setq i 0)
-      ;; 1. Agrupar todas as hachuras por (Camada + Assinatura Espacial)
-      (while (< i (sslength ss))
-        (setq ent (ssname ss i))
-        (if (and ent (setq elist (entget ent)))
-          (progn
-            (setq lay (cdr (assoc 8 elist)))
-            (setq sig (chlay:get-hatch-sig ent))
-            (if sig
-              (progn
-                (setq group_key (strcase (strcat lay "_" sig)))
-                (setq item (assoc group_key groups))
-                (if item
-                  (setq groups (subst (cons group_key (cons ent (cdr item))) item groups))
-                  (setq groups (cons (cons group_key (list ent)) groups))
-                )
-              )
-            )
-          )
-        )
-        (setq i (1+ i))
-      )
-
-      ;; 2. Processar cada grupo de hachuras
-      (foreach item groups
-        (setq group_ents (cdr item))
-        (if (and group_ents (entget (car group_ents)))
-          (progn
-            (setq lay_name (cdr (assoc 8 (entget (car group_ents)))))
-            (setq is_pilar (= (strcase lay_name) "PP_PILAR"))
-            (setq lay_def (chlay:find-layer lay_name predefined_layers))
-            (setq props (if lay_def (cdr lay_def) nil))
-            (setq hatch_pattern (cdr (assoc "HatchPattern" props)))
-            (setq hatch_scale (cdr (assoc "HatchScale" props)))
-            (setq hatch_transparency (cdr (assoc "HatchTransparency" props)))
-
-            (cond
-              ;; --- PP_PILAR: EXATAMENTE 2 HACHURAS (SOLID + ANSI37) ---
-              (is_pilar
-               (cond
-                 ;; Caso 1: Apenas 1 hachura existe no local -> formata como SOLID (80) e cria cópia ANSI37 (0)
-                 ((= (length group_ents) 1)
-                  (setq h_solid (car group_ents))
-                  (setq vla_solid (vlax-ename->vla-object h_solid))
-                  
-                  ;; Fundo: SOLID, Transparência 80
-                  (vl-catch-all-apply
-                    '(lambda ()
-                       (vla-SetPattern vla_solid 1 "SOLID")
-                       (vla-put-PatternAngle vla_solid 0.0)
-                       (vla-evaluate vla_solid)
-                     )
-                  )
-                  (chlay:set-transparency h_solid 80)
-                  (vl-catch-all-apply
-                    '(lambda ()
-                       (setq none_color (vla-get-backgroundcolor vla_solid))
-                       (if (and none_color (not (vl-catch-all-error-p none_color)))
-                         (progn
-                           (vla-put-entitycolor none_color -939524096)
-                           (vla-put-backgroundcolor vla_solid none_color)
-                         )
-                       )
-                     )
-                  )
-
-                  ;; Topo: ANSI37 (diagonal cruzada), Transparência 0
-                  (setq vla_ansi (vl-catch-all-apply 'vla-Copy (list vla_solid)))
-                  (if (and vla_ansi (not (vl-catch-all-error-p vla_ansi)))
-                    (progn
-                      (vl-catch-all-apply
-                        '(lambda ()
-                           (vla-SetPattern vla_ansi 1 (if hatch_pattern hatch_pattern "ANSI37"))
-                           (vla-put-PatternAngle vla_ansi 0.0)
-                           (vla-put-PatternScale vla_ansi (if (numberp hatch_scale) hatch_scale 0.03))
-                           (vla-evaluate vla_ansi)
-                         )
-                      )
-                      (setq h_ansi (vlax-vla-object->ename vla_ansi))
-                      (chlay:set-transparency h_ansi 0)
-                      (vl-catch-all-apply
-                        '(lambda ()
-                           (setq none_color (vla-get-backgroundcolor vla_ansi))
-                           (if (and none_color (not (vl-catch-all-error-p none_color)))
-                             (progn
-                               (vla-put-entitycolor none_color -939524096)
-                               (vla-put-backgroundcolor vla_ansi none_color)
-                             )
-                           )
-                         )
-                      )
-                    )
-                  )
-                 )
-
-                 ;; Caso 2: Existem 2 ou mais hachuras no local -> formata as 2 e DELETA todas as sobressalentes
-                 (t
-                  (setq h_solid (car group_ents))
-                  (setq h_ansi (cadr group_ents))
-                  (setq vla_solid (vlax-ename->vla-object h_solid))
-                  (setq vla_ansi (vlax-ename->vla-object h_ansi))
-
-                  ;; 1ª Hachura: SOLID Fundo (Transparência 80)
-                  (vl-catch-all-apply
-                    '(lambda ()
-                       (vla-SetPattern vla_solid 1 "SOLID")
-                       (vla-put-PatternAngle vla_solid 0.0)
-                       (vla-evaluate vla_solid)
-                     )
-                  )
-                  (chlay:set-transparency h_solid 80)
-                  (vl-catch-all-apply
-                    '(lambda ()
-                       (setq none_color (vla-get-backgroundcolor vla_solid))
-                       (if (and none_color (not (vl-catch-all-error-p none_color)))
-                         (progn
-                           (vla-put-entitycolor none_color -939524096)
-                           (vla-put-backgroundcolor vla_solid none_color)
-                         )
-                       )
-                     )
-                  )
-
-                  ;; 2ª Hachura: ANSI37 Topo (Transparência 0)
-                  (vl-catch-all-apply
-                    '(lambda ()
-                       (vla-SetPattern vla_ansi 1 (if hatch_pattern hatch_pattern "ANSI37"))
-                       (vla-put-PatternAngle vla_ansi 0.0)
-                       (vla-put-PatternScale vla_ansi (if (numberp hatch_scale) hatch_scale 0.03))
-                       (vla-evaluate vla_ansi)
-                     )
-                  )
-                  (chlay:set-transparency h_ansi 0)
-                  (vl-catch-all-apply
-                    '(lambda ()
-                       (setq none_color (vla-get-backgroundcolor vla_ansi))
-                       (if (and none_color (not (vl-catch-all-error-p none_color)))
-                         (progn
-                           (vla-put-entitycolor none_color -939524096)
-                           (vla-put-backgroundcolor vla_ansi none_color)
-                         )
-                       )
-                     )
-                  )
-
-                  ;; DELETAR TODAS AS HACHURAS SOBRESSALENTES (da 3ª em diante)
-                  (if (> (length group_ents) 2)
-                    (foreach h_extra (cddr group_ents)
-                      (if (and h_extra (entget h_extra))
-                        (progn
-                          (entdel h_extra)
-                          (setq del_count (1+ del_count))
-                        )
-                      )
-                    )
-                  )
-                 )
-               )
-              )
-
-              ;; --- DEMAIS CAMADAS (incluindo PP_LAYOUT): EXATAMENTE 1 HACHURA POR LOCAL ---
-              (t
-               (setq h_solid (car group_ents))
-               (setq vla_solid (vlax-ename->vla-object h_solid))
-               (if hatch_pattern
-                 (vl-catch-all-apply
-                   '(lambda ()
-                      (vla-SetPattern vla_solid 1 hatch_pattern)
-                      (vla-put-PatternAngle vla_solid 0.0)
-                      (if (and hatch_scale (numberp hatch_scale)) (vla-put-PatternScale vla_solid hatch_scale))
-                      (vla-evaluate vla_solid)
-                    )
-                 )
-               )
-               (if hatch_transparency
-                 (chlay:set-transparency h_solid hatch_transparency)
-               )
-               (vl-catch-all-apply
-                 '(lambda ()
-                    (setq none_color (vla-get-backgroundcolor vla_solid))
-                    (if (and none_color (not (vl-catch-all-error-p none_color)))
-                      (progn
-                        (vla-put-entitycolor none_color -939524096)
-                        (vla-put-backgroundcolor vla_solid none_color)
-                      )
-                    )
-                  )
-               )
-               ;; Deletar quaisquer duplicatas extras
-               (if (> (length group_ents) 1)
-                 (foreach h_extra (cdr group_ents)
-                   (if (and h_extra (entget h_extra))
-                     (progn
-                       (entdel h_extra)
-                       (setq del_count (1+ del_count))
-                     )
-                   )
-                 )
-               )
-              )
-            )
-          )
-        )
-      )
-    )
-  )
-  del_count
-)
-
-;; Cria hachura a partir de uma polilinha fechada via VLA sem usar linha de comando
-(defun chlay:create-polyline-hatch (ent / doc space vla-poly hatchObj outerLoop res old_cetrans)
-  (vl-load-com)
-  (setq res nil)
-  (setq old_cetrans (getvar "CETRANSPARENCY"))
-  (vl-catch-all-apply '(lambda () (setvar "CETRANSPARENCY" "80")))
-
-  (setq res
-    (vl-catch-all-apply
-      '(lambda ()
-         (setq doc (vla-get-activedocument (vlax-get-acad-object)))
-         (setq space (vla-get-modelspace doc))
-         (setq vla-poly (vlax-ename->vla-object ent))
-         (setq hatchObj (vla-AddHatch space 1 "SOLID" :vlax-false))
-         (setq outerLoop (vlax-make-safearray vlax-vbObject '(0 . 0)))
-         (vlax-safearray-put-element outerLoop 0 vla-poly)
-         (vla-AppendOuterLoop hatchObj outerLoop)
-         (vla-Evaluate hatchObj)
-         (vlax-vla-object->ename hatchObj)
-       )
-    )
-  )
-  (vl-catch-all-apply '(lambda () (setvar "CETRANSPARENCY" old_cetrans)))
-  (if (and res (not (vl-catch-all-error-p res)) (entget res))
-    res
-    nil
-  )
-)
-
-;; Caches de alto desempenho para evitar lookups e checagens redundantes
-(setq *chlay-canonical-cache* nil)
-(setq *chlay-verified-layers* nil)
-
-(defun chlay:get-canonical-layer (target_name / cached lay_def target_canonical)
-  (if (setq cached (assoc (strcase target_name) *chlay-canonical-cache*))
-    (cdr cached)
-    (progn
-      (setq lay_def (chlay:find-layer target_name (chlay:get-predefined-layers)))
-      (setq target_canonical (if lay_def (car lay_def) target_name))
-      (setq *chlay-canonical-cache* (cons (cons (strcase target_name) target_canonical) *chlay-canonical-cache*))
-      target_canonical
-    )
-  )
-)
-
-(defun chlay:ensure-target-layer (target_canonical / doc layers)
-  (if (not (member (strcase target_canonical) *chlay-verified-layers*))
-    (progn
-      (if (not (tblsearch "LAYER" target_canonical))
-        (vl-catch-all-apply 
-          '(lambda () 
-             (setq doc (vla-get-activedocument (vlax-get-acad-object)))
-             (setq layers (vla-get-layers doc))
-             (vla-add layers target_canonical)
-           )
-        )
-      )
-      (setq *chlay-verified-layers* (cons (strcase target_canonical) *chlay-verified-layers*))
-    )
-  )
-)
-
-;; Mover ou Copiar entidade individual diretamente para a camada alvo (ultra-rÃ¡pido)
-(defun chlay:move-entity (ent target_name / vla-obj err copy-obj ent_to_format target_canonical)
-  (if (and ent (entget ent) target_name (/= target_name ""))
-    (progn
-      ;; Identifica o nome canÃ´nico exato da camada de destino via cache O(1)
-      (setq target_canonical (chlay:get-canonical-layer target_name))
-
-      ;; Garante que a camada de destino exista no desenho (uma Ãºnica checagem)
-      (chlay:ensure-target-layer target_canonical)
-
-      (setq vla-obj (vlax-ename->vla-object ent))
-      (setq ent_to_format ent)
-
-      ;; Altera a camada e define propriedades ByLayer em chamada atÃ´mica
-      (setq err (vl-catch-all-apply '(lambda () (vla-put-layer vla-obj target_canonical))))
-
-      ;; Se a alteraÃ§Ã£o direta de camada falhar (objeto proxy ou restrito), fallback via cÃ³pia
-      (if (vl-catch-all-error-p err)
-        (progn
-          (setq copy-obj (vl-catch-all-apply '(lambda () (vla-copy vla-obj))))
-          (if (and copy-obj (not (vl-catch-all-error-p copy-obj)))
-            (progn
-              (vl-catch-all-apply '(lambda () (vla-put-layer copy-obj target_canonical)))
-              (vl-catch-all-apply '(lambda () (vla-delete vla-obj)))
-              (setq ent_to_format (vlax-vla-object->ename copy-obj))
-              (setq vla-obj copy-obj)
-            )
-          )
-        )
-      )
-
-      ;; Aplica propriedades ByLayer individualmente e com seguranÃ§a
-      (vl-catch-all-apply '(lambda () (vla-put-color vla-obj 256)))
-      (vl-catch-all-apply '(lambda () (vla-put-linetype vla-obj "ByLayer")))
-      (vl-catch-all-apply '(lambda () (vla-put-linetypescale vla-obj 1.0)))
-      (vl-catch-all-apply '(lambda () (vla-put-lineweight vla-obj -1)))
-
-      ;; Aplicar formataÃ§Ã£o de hachuras APENAS para camadas que exigem padrÃ£o especÃ­fico
-      (if (and ent_to_format 
-               (entget ent_to_format) 
-               (= (cdr (assoc 0 (entget ent_to_format))) "HATCH")
-               (member (strcase target_canonical) '("PP_ARQUITETURA" "PP_PILAR" "PP_FORRO")))
-        (chlay:format-hatch ent_to_format target_canonical)
-      )
-    )
-  )
-)
-
-;; Aplica as propriedades padrão da camada lay_name à seleção de objetos ss (CHL Manual)
-(defun chlay:apply-layer (ss lay_name / i ent count_hatch_del doc old_cmdecho predefined_layers lay_def target_canonical)
-  (if (and ss lay_name (/= lay_name ""))
-    (progn
-      (vl-load-com)
-      (setq doc (vla-get-activedocument (vlax-get-acad-object)))
-      (vla-StartUndoMark doc)
-      (setq old_cmdecho (getvar "CMDECHO"))
-      (setvar "CMDECHO" 0)
-      
-      ;; 1. Garante e restaura/reafirma TODAS as camadas padrão PP com suas cores e tipos de linha
-      (chlay:ensure-all-predefined-layers)
-      
-      ;; 2. Identifica o nome canônico da camada (tolerante a acentos e maiúsculas/minúsculas)
-      (setq predefined_layers (chlay:get-predefined-layers))
-      (setq lay_def (chlay:find-layer lay_name predefined_layers))
-      (setq target_canonical (if lay_def (car lay_def) lay_name))
-      
-      (setq i 0)
-      (while (< i (sslength ss))
-        (setq ent (ssname ss i))
-        (chlay:move-entity ent target_canonical)
-        (setq i (1+ i))
-      )
-      ;; Deduplica apenas para PP_PILAR se aplicável
-      (if (= (strcase target_canonical) "PP_PILAR")
-        (setq count_hatch_del (chlay:deduplicate-hatches target_canonical))
-        (setq count_hatch_del 0)
-      )
-      (vl-catch-all-apply '(lambda () (vla-regen doc acActiveViewport)))
-      (if old_cmdecho (setvar "CMDECHO" old_cmdecho))
-      (vla-EndUndoMark doc)
-      (if (> count_hatch_del 0)
-        (prompt (strcat "\n[CHL] " (itoa count_hatch_del) " hachura(s) sobreposta(s) sobressalente(s) removida(s)."))
-      )
-    )
-  )
-  (setvar "LTSCALE" 0.03)
-  (setvar "CLAYER" "0")
-  (princ)
-)
-
-;; Comando manual CHL: altera seleção para a camada digitada pelo usuário
-(defun c:CHL (/ ss lay_name) 
-  (setq ss (ssget "_I"))
-  (setq lay_name (getstring T "\nDigite o nome da camada de destino: "))
-  (if (not ss) 
-    (progn 
-      (prompt (strcat "\nSelecione os objetos para transferir para " (if (and lay_name (/= lay_name "")) lay_name "a camada") ": "))
-      (setq ss (ssget))
-    )
-  )
-
-  (if (and ss lay_name (/= lay_name "")) 
-    (chlay:apply-layer ss lay_name)
-    (if (not ss)
-      (prompt "\nNenhum objeto selecionado.")
-      (prompt "\nNome de camada inválido.")
-    )
-  )
-  (princ)
-)
-
-;; Auxiliar: substitui ocorrências de uma substring em um texto
-(defun chlay:replace-str (str old new / pos)
-  (while (setq pos (vl-string-search old str))
-    (setq str (strcat (substr str 1 pos) new (substr str (+ pos (strlen old) 1))))
-  )
-  str
-)
-
-;; Auxiliar: extrai o nome base da camada removendo prefixos de XREF (| ou $0$ ou $)
-(defun chlay:get-base-layer (lay_name / pos)
-  (setq lay_name (strcase lay_name))
-  ;; 1. Remover prefixo de XREF padrão AutoCAD (ex: "01_BASE|I-FURN" -> "I-FURN")
-  (if (setq pos (vl-string-search "|" lay_name))
-    (while (setq pos (vl-string-search "|" lay_name))
-      (setq lay_name (substr lay_name (+ pos 2)))
-    )
-  )
-  ;; 2. Remover prefixo de XREF com bind $0$ (ex: "01_BASE$0$I-FURN" -> "I-FURN")
-  (if (setq pos (vl-string-search "$0$" lay_name))
-    (while (setq pos (vl-string-search "$0$" lay_name))
-      (setq lay_name (substr lay_name (+ pos 4)))
-    )
-  )
-  ;; 3. Remover prefixo $ genérico (ex: "01_BASE$I-FURN" -> "I-FURN")
-  (if (setq pos (vl-string-search "$" lay_name))
-    (while (setq pos (vl-string-search "$" lay_name))
-      (setq lay_name (substr lay_name (+ pos 2)))
-    )
-  )
-  lay_name
-)
-
-;; Auxiliar de correspondÃªncia rÃ¡pida com strings prÃ©-normalizadas
-(defun chlay:fast-match-p (str_lay base_lay pat / str_pat wild1 wild2)
-  (setq str_pat (vl-string-trim " \t\r\n" (strcase pat)))
-  (cond
-    ;; 1. Regra especÃ­fica para camada "0"
-    ((= str_pat "0")
-     (or (= str_lay "0") (= base_lay "0"))
-    )
-
-    ;; 2. PadrÃ£o iniciando com $0$ (ex: $0$ALVENARIA)
-    ((vl-string-search "$0$" str_pat)
-     (or (wcmatch str_lay (strcat "*" str_pat))
-         (= base_lay (substr str_pat (+ (vl-string-search "$0$" str_pat) 4)))
-     )
-    )
-
-    ;; 3. Igualdade exata no nome completo ou no nome base (sem prefixo XREF) ou wcmatch
-    ((or (= str_lay str_pat)
-         (= base_lay str_pat)
-         (wcmatch str_lay str_pat)
-         (wcmatch base_lay str_pat)
-     )
-     T
-    )
-
-    ;; 4. Se pat contÃ©m "____"
-    ((vl-string-search "____" str_pat)
-     (setq wild1 (chlay:replace-str str_pat "____" "*"))
-     (setq wild2 (chlay:replace-str str_pat "-____-" "*"))
-     (or (wcmatch str_lay wild1)
-         (wcmatch str_lay wild2)
-         (wcmatch base_lay wild1)
-         (wcmatch base_lay wild2)
-         (wcmatch str_lay (chlay:replace-str str_pat "-____" "*"))
-         (wcmatch str_lay (chlay:replace-str str_pat "____-" "*"))
-         (wcmatch base_lay (chlay:replace-str str_pat "-____" "*"))
-         (wcmatch base_lay (chlay:replace-str str_pat "____-" "*"))
-     )
-    )
-
-    ;; 5. Se pat contÃ©m "---" (ex: A---DIMS)
-    ((vl-string-search "---" str_pat)
-     (or (wcmatch str_lay (strcat (chlay:replace-str str_pat "---" "*") "*"))
-         (wcmatch base_lay (strcat (chlay:replace-str str_pat "---" "*") "*"))
-     )
-    )
-
-    (t nil)
-  )
-)
-
-;; Auxiliar: verifica correspondÃªncia entre o nome da camada original no CAD e o padrÃ£o da regra
-(defun chlay:layer-matches-p (lay_name pat / str_lay base_lay)
-  (setq str_lay (vl-string-trim " \t\r\n" (strcase lay_name)))
-  (setq base_lay (vl-string-trim " \t\r\n" (chlay:get-base-layer lay_name)))
-  (chlay:fast-match-p str_lay base_lay pat)
-)
-
-;; Função auxiliar de resolução de ação por camada (usada pelo cache de camadas)
-(defun chlay:resolve-layer-action (lay rules_del rules_mp / str_lay base_lay del_found target)
-  (setq str_lay (vl-string-trim " \t\r\n" (strcase lay)))
-  (setq base_lay (vl-string-trim " \t\r\n" (chlay:get-base-layer lay)))
-
-  (cond
-    ;; Condicional 1: MobiliÃ¡rio / I-FURN -> apaga hachuras; outros elementos vÃ£o para PP_LAYOUT
-    ((or (chlay:fast-match-p str_lay base_lay "I-FURN")
-         (chlay:fast-match-p str_lay base_lay "*FURN*")
-         (chlay:fast-match-p str_lay base_lay "MÃ“VEIS")
-         (chlay:fast-match-p str_lay base_lay "MOVEIS")
-         (chlay:fast-match-p str_lay base_lay "*MOB*"))
-     (cons "COND_FURN" "PP_LAYOUT")
-    )
-
-    ;; Condicional 2: A-DETL-GENF -> hachuras vÃ£o para PP_FORRO; outros elementos vÃ£o para PP_EQUIPAMENTO
-    ((or (chlay:fast-match-p str_lay base_lay "A-DETL-GENF")
-         (chlay:fast-match-p str_lay base_lay "*DETL-GENF*")
-         (chlay:fast-match-p str_lay base_lay "*GENF*"))
-     (cons "COND_GENF" "PP_EQUIPAMENTO")
-    )
-
-    ;; Condicional 3: TEXTO3 -> apaga apenas TEXT simples; MTEXT vai para PP_TEXTO APOIO
-    ((chlay:fast-match-p str_lay base_lay "TEXTO3")
-     (cons "COND_TEXTO3" "PP_TEXTO APOIO")
-    )
-
-    ;; Condicional 4: VAZIO -> apaga apenas HATCH; linhas/polilinhas vÃ£o para PP_LAYOUT
-    ((chlay:fast-match-p str_lay base_lay "VAZIO")
-     (cons "COND_VAZIO" "PP_LAYOUT")
-    )
-
-    ;; Condicional 5: A-AREA-IDEN -> move para PP_TEXTO (evita ser capturado por regras de exclusÃ£o de IDEN)
-    ((or (chlay:fast-match-p str_lay base_lay "A-AREA-IDEN")
-         (chlay:fast-match-p str_lay base_lay "*AREA-IDEN*")
-         (chlay:fast-match-p str_lay base_lay "*AREA*IDEN*"))
-     (cons "MOVE" "PP_TEXTO")
-    )
-
-    ;; Condicional 6: A-DETL-MBND / Vagas de Garagem -> apaga hachuras e textos; linhas/polilinhas vÃ£o para PP_GARAGEM
-    ((or (chlay:fast-match-p str_lay base_lay "A-DETL-MBND")
-         (chlay:fast-match-p str_lay base_lay "A-DETL-____-MBND")
-         (chlay:fast-match-p str_lay base_lay "*DETL*MBND*")
-         (chlay:fast-match-p str_lay base_lay "A-DETL-*-MBND"))
-     (cons "COND_MBND" "PP_GARAGEM")
-    )
-
-    ;; Condicional 7: Selos de Zona -> textos e blocos vÃ£o para PP_TEXTO, linhas/polilinhas/hachuras sÃ£o apagadas
-    ((or (chlay:fast-match-p str_lay base_lay "Selos de Zona*")
-         (chlay:fast-match-p str_lay base_lay "*Selos de Zona*")
-         (chlay:fast-match-p str_lay base_lay "*Selo*Zona*"))
-     (cons "COND_ZON_TEXT" "PP_TEXTO")
-    )
-
-    ;; Condicional 8: Zonas (ZON _ Ambiente, ZON _ Ãreas e PerÃ­metros) -> textos e blocos vÃ£o para PP_TEXTO APOIO, linhas/polilinhas/hachuras sÃ£o apagadas
-    ((and (or (chlay:fast-match-p str_lay base_lay "ZON _ *")
-              (chlay:fast-match-p str_lay base_lay "*ZON _ Ambiente*")
-              (chlay:fast-match-p str_lay base_lay "*ZON _ *rea*")
-              (chlay:fast-match-p str_lay base_lay "*ZON*"))
-          (not (chlay:fast-match-p str_lay base_lay "*APTO PCD*ZON*")))
-     (cons "COND_ZON_APOIO" "PP_TEXTO APOIO")
-    )
-
-    ;; Caso padrÃ£o: verificar regras de exclusÃ£o e depois remapeamento
-    (t
-     (setq del_found nil)
-     (foreach del_pat rules_del
-       (if (and (not del_found) (chlay:fast-match-p str_lay base_lay del_pat))
-         (setq del_found T)
-       )
-     )
-     (if del_found
-       (cons "DELETE" nil)
-       (progn
-         (setq target nil)
-         (foreach map_entry rules_mp
-           (if (and (not target) (chlay:fast-match-p str_lay base_lay (car map_entry)))
-             (setq target (cdr map_entry))
-           )
-         )
-         (if target
-           (cons "MOVE" target)
-           (cons "NONE" nil)
-         )
-       )
-     )
-    )
-  )
-)
-
-;; Função auxiliar de limpeza automática baseada em regras de exclusão e remapeamento (CHLAUTO ultra-rápido com cache)
-(defun chlay:clean-selection (ss / rules_delete rules_map i j ent elist ent_lay ent_type target_lay 
-                                   count_del count_move count_ignored count_created 
-                                   new_hatch old_cmdecho old_highlight doc
-                                   existing_hatch_sigs ss_existing_hatches h_ent h_sig pline_sig
-                                   layer_cache cache_entry action_code act_type u_lay
-                             )
-  (if ss
-    (progn
-      (vl-load-com)
-      (setq doc (vla-get-activedocument (vlax-get-acad-object)))
-      (vla-StartUndoMark doc)
-      (setq old_cmdecho (getvar "CMDECHO"))
-      (setq old_highlight (getvar "HIGHLIGHT"))
-      (setvar "CMDECHO" 0)
-      (if old_highlight (setvar "HIGHLIGHT" 0))
-      (sssetfirst nil nil)
-      (chlay:ensure-all-predefined-layers)
-      
-      ;; 1. Regras de exclusão estritas (tags de identificação, carimbos, lixos e camadas numéricas do projetista estrutural)
-      (setq rules_delete '(
+(setq *chlay-rules-delete* '(
         ;; --- Camadas Numéricas a serem Excluídas (Projetista Estrutural) ---
         "225" "228" "218" "209" "207" "215" "230" "214" "237"
         "170" "213" "217" "245" "223" "204" "171" "224" "248"
@@ -1049,10 +151,8 @@
         "*TAG _ Corte*"
         "*TAG _ Eleva*"
       ))
-      
-      ;; 2. Regras de remapeamento: '( ("CAMADA_ORIGEM_OU_PADRAO" . "CAMADA_DESTINO_PP") ... )
-      ;; Organizadas por prioridade de especificidade
-      (setq rules_map '(
+
+(setq *chlay-rules-map* '(
         ;; --- PP_REGIÃO ---
         ("*PAVIMENTO TIPO*Guarda*Corpo*91*" . "PP_REGIÃO")
         ("PAVIMENTO TIPO ( 2º ao 14º )_1_OBJ _ Guarda-Corpo e Corrimão.3D_Caneta_No__91" . "PP_REGIÃO")
@@ -1497,214 +597,974 @@
         ("*PAGINA*" . "PP_LAYOUT")
         ("*LAYOUT*" . "PP_LAYOUT")
       ))
-      
-      (setq count_del 0)
-      (setq count_move 0)
-      (setq count_ignored 0)
-      (setq layer_cache nil)
-      (setq i 0)
-      
-      (while (< i (sslength ss))
-        (setq ent (ssname ss i))
-        (if (and ent (setq elist (entget ent)))
-          (progn
-            (setq ent_lay (cdr (assoc 8 elist)))
-            (setq ent_type (cdr (assoc 0 elist)))
-            (setq u_lay (strcase ent_lay))
-            
-            ;; Consulta rÃ¡pida no cache de decisÃµes de camada (O(1))
-            (setq cache_entry (assoc u_lay layer_cache))
-            (if (not cache_entry)
-              (progn
-                (setq cache_entry (cons u_lay (chlay:resolve-layer-action ent_lay rules_delete rules_map)))
-                (setq layer_cache (cons cache_entry layer_cache))
-              )
-            )
-            (setq action_code (cdr cache_entry))
-            (setq act_type (car action_code))
-            
-            ;; Execução direta da ação pré-resolvida
-            (cond
-              ;; Exclusão direta da entidade (entdel é instantâneo em C)
-              ((= act_type "DELETE")
-               (entdel ent)
-               (setq count_del (1+ count_del))
-              )
 
-              ;; Condicional Mobiliário: hachura apaga, resto vai para PP_LAYOUT
-              ((= act_type "COND_FURN")
-               (if (= ent_type "HATCH")
-                 (progn
-                   (entdel ent)
-                   (setq count_del (1+ count_del))
-                 )
-                 (progn
-                   (chlay:move-entity ent "PP_LAYOUT")
-                   (setq count_move (1+ count_move))
-                 )
-               )
-              )
-
-              ;; Condicional Detalhe/Forro: hachura vai para PP_FORRO, resto para PP_EQUIPAMENTO
-              ((= act_type "COND_GENF")
-               (if (= ent_type "HATCH")
-                 (progn
-                   (chlay:move-entity ent "PP_FORRO")
-                   (setq count_move (1+ count_move))
-                 )
-                 (progn
-                   (chlay:move-entity ent "PP_EQUIPAMENTO")
-                   (setq count_move (1+ count_move))
-                 )
-               )
-              )
-
-              ;; Condicional TEXTO3: TEXT simples apaga, MTEXT vai para PP_TEXTO APOIO
-              ((= act_type "COND_TEXTO3")
-               (if (= ent_type "TEXT")
-                 (progn
-                   (entdel ent)
-                   (setq count_del (1+ count_del))
-                 )
-                 (progn
-                   (chlay:move-entity ent "PP_TEXTO APOIO")
-                   (setq count_move (1+ count_move))
-                 )
-               )
-              )
-
-              ;; Condicional VAZIO: hachura apaga, resto vai para PP_LAYOUT
-              ((= act_type "COND_VAZIO")
-               (if (= ent_type "HATCH")
-                 (progn
-                   (entdel ent)
-                   (setq count_del (1+ count_del))
-                 )
-                 (progn
-                   (chlay:move-entity ent "PP_LAYOUT")
-                   (setq count_move (1+ count_move))
-                 )
-               )
-              )
-
-              ;; Condicional MBND (Demarcação de Vagas): hachura e texto apagam, linhas/polilinhas vão para PP_GARAGEM
-              ((= act_type "COND_MBND")
-               (if (or (= ent_type "HATCH")
-                       (member ent_type '("TEXT" "MTEXT" "MULTILEADER" "LEADER")))
-                 (progn
-                   (entdel ent)
-                   (setq count_del (1+ count_del))
-                 )
-                 (progn
-                   (chlay:move-entity ent "PP_GARAGEM")
-                   (setq count_move (1+ count_move))
-                 )
-               )
-              )
-
-              ;; Condicional Selos de Zona: textos/blocos vão para PP_TEXTO, linhas/polilinhas/hachuras apagam
-              ((= act_type "COND_ZON_TEXT")
-               (if (member ent_type '("TEXT" "MTEXT" "INSERT" "MULTILEADER" "LEADER"))
-                 (progn
-                   (chlay:move-entity ent "PP_TEXTO")
-                   (setq count_move (1+ count_move))
-                 )
-                 (progn
-                   (entdel ent)
-                   (setq count_del (1+ count_del))
-                 )
-               )
-              )
-
-              ;; Condicional Zonas: textos/blocos vão para PP_TEXTO APOIO, linhas/polilinhas/hachuras apagam
-              ((= act_type "COND_ZON_APOIO")
-               (if (member ent_type '("TEXT" "MTEXT" "INSERT" "MULTILEADER" "LEADER"))
-                 (progn
-                   (chlay:move-entity ent "PP_TEXTO APOIO")
-                   (setq count_move (1+ count_move))
-                 )
-                 (progn
-                   (entdel ent)
-                   (setq count_del (1+ count_del))
-                 )
-               )
-              )
-
-              ;; Remapeamento de camada
-              ((= act_type "MOVE")
-               (setq target_lay (cdr action_code))
-               (cond
-                 ;; ExceÃ§Ã£o HACHURAS e TEXTOS para PP_GARAGEM:
-                 ;; Se for HATCH ou TEXTO e estiver sendo transferido para PP_GARAGEM de outra camada, apaga.
-                 ((and (= (strcase target_lay) "PP_GARAGEM")
-                       (or (= ent_type "HATCH")
-                           (member ent_type '("TEXT" "MTEXT" "MULTILEADER" "LEADER")))
-                       (/= (strcase ent_lay) "PP_GARAGEM"))
-                  (entdel ent)
-                  (setq count_del (1+ count_del))
-                 )
-
-                 ;; ExceÃ§Ã£o HACHURA para PP_LAYOUT:
-                 ;; Se for HATCH e estiver sendo transferida para PP_LAYOUT de outra camada, apaga.
-                 ((and (= (strcase target_lay) "PP_LAYOUT")
-                       (= ent_type "HATCH")
-                       (/= (strcase ent_lay) "PP_LAYOUT"))
-                  (entdel ent)
-                  (setq count_del (1+ count_del))
-                 )
-
-                 ;; Demais elementos a mover
-                 (t
-                  (if (/= (strcase ent_lay) (strcase target_lay))
-                    (progn
-                      (chlay:move-entity ent target_lay)
-                      (setq count_move (1+ count_move))
-                    )
-                  )
-
-                  ;; Se for pilar e polilinha, garante fechamento (Closed = Yes via DXF 70 rápido)
-                  (if (= (strcase target_lay) "PP_PILAR")
-                    (if (member ent_type '("LWPOLYLINE" "POLYLINE"))
-                      (if (and (assoc 70 elist) (numberp (cdr (assoc 70 elist))))
-                        (if (= (logand (cdr (assoc 70 elist)) 1) 0)
-                          (entmod (subst (cons 70 (logior (cdr (assoc 70 elist)) 1)) (assoc 70 elist) elist))
-                        )
-                      )
-                    )
-                  )
-                 )
-               )
-              )
-
-              ;; Nenhuma regra aplicada / camada desconhecida -> mantido intacto
-              (t 
-               (setq count_ignored (1+ count_ignored))
-              )
-            )
-          )
-        )
-        (setq i (1+ i))
+;; Índices AVL em memória: consulta/inserção O(log n), sem objetos COM,
+;; sem símbolos por entidade e sem gravar caches no DWG.
+(defun chlay:height (node) (if node (nth 4 node) 0))
+(defun chlay:node (key value left right)
+  (list key value left right (1+ (max (chlay:height left) (chlay:height right))))
+)
+(defun chlay:rotate-left (node / pivot)
+  (setq pivot (cadddr node))
+  (chlay:node (car pivot) (cadr pivot)
+    (chlay:node (car node) (cadr node) (caddr node) (caddr pivot)) (cadddr pivot))
+)
+(defun chlay:rotate-right (node / pivot)
+  (setq pivot (caddr node))
+  (chlay:node (car pivot) (cadr pivot) (caddr pivot)
+    (chlay:node (car node) (cadr node) (cadddr pivot) (cadddr node)))
+)
+(defun chlay:map-get (tree key / found)
+  (while (and tree (not found))
+    (cond
+      ((= key (car tree)) (setq found (cons key (cadr tree))))
+      ((< key (car tree)) (setq tree (caddr tree)))
+      (T (setq tree (cadddr tree)))
+    )
+  )
+  found
+)
+(defun chlay:map-put (tree key value / balance left right)
+  (if (not tree)
+    (chlay:node key value nil nil)
+    (progn
+      (setq left (caddr tree) right (cadddr tree))
+      (cond
+        ((= key (car tree)) (setq tree (chlay:node key value left right)))
+        ((< key (car tree))
+          (setq tree (chlay:node (car tree) (cadr tree) (chlay:map-put left key value) right)))
+        (T (setq tree (chlay:node (car tree) (cadr tree) left (chlay:map-put right key value))))
       )
-      
-      (vl-catch-all-apply '(lambda () (vla-regen doc acActiveViewport)))
-      (if old_highlight (setvar "HIGHLIGHT" old_highlight))
-      (if old_cmdecho (setvar "CMDECHO" old_cmdecho))
-      (vla-EndUndoMark doc)
-      
-      (prompt (strcat "\n[CHLAUTO] Limpeza concluída: " 
-                      (itoa count_move) " objeto(s) modificado(s), " 
-                      (itoa count_del) " excluído(s), " 
-                      (itoa count_ignored) " ignorado(s)."
-              )
+      (setq left (caddr tree) right (cadddr tree)
+            balance (- (chlay:height left) (chlay:height right)))
+      (cond
+        ((> balance 1)
+          (if (> (chlay:height (cadddr left)) (chlay:height (caddr left)))
+            (setq tree (chlay:node (car tree) (cadr tree) (chlay:rotate-left left) right)))
+          (chlay:rotate-right tree))
+        ((< balance -1)
+          (if (> (chlay:height (caddr right)) (chlay:height (cadddr right)))
+            (setq tree (chlay:node (car tree) (cadr tree) left (chlay:rotate-right right))))
+          (chlay:rotate-left tree))
+        (T tree)
       )
     )
+  )
+)
+(defun chlay:map-items (tree)
+  (if tree
+    (append (chlay:map-items (caddr tree)) (list (cons (car tree) (cadr tree)))
+      (chlay:map-items (cadddr tree))))
+)
+
+(defun chlay:find-layer (name lst / target normalized result item original)
+  (setq original lst)
+  (if (= (type name) 'STR)
+    (progn
+      (setq target (strcase name))
+      (while (and lst (not result))
+        (if (= target (strcase (caar lst))) (setq result (car lst)))
+        (setq lst (cdr lst)))
+      ;; A segunda passagem mantém a precedência histórica da busca exata.
+      (if (not result)
+        (progn
+          (setq normalized (chlay:norm-str name) lst original)
+          (while (and lst (not result))
+            (setq item (car lst))
+            (if (or (= normalized (chlay:norm-str (car item)))
+                    (wcmatch target (strcase (car item)))
+                    (wcmatch normalized (chlay:norm-str (car item))))
+              (setq result item))
+            (setq lst (cdr lst)))))
+    )
+  )
+  result
+)
+(defun chlay:get-canonical-layer (name / key cached found value)
+  (setq key (strcase name) cached (chlay:map-get *chlay-canonical-cache* key))
+  (if cached (cdr cached)
+    (progn
+      (setq found (chlay:find-layer name *chlay-layer-definitions*)
+            value (if found (car found) name)
+            *chlay-canonical-cache* (chlay:map-put *chlay-canonical-cache* key value))
+      value))
+)
+(defun chlay:doc ()
+  (if *chlay-context* (car *chlay-context*) (vla-get-activedocument (vlax-get-acad-object)))
+)
+(defun chlay:layers ()
+  (if *chlay-context* (cadr *chlay-context*) (vla-get-layers (chlay:doc)))
+)
+(defun chlay:ensure-target-layer (name / data object)
+  (if (and *chlay-context* (chlay:map-get *chlay-verified-layers* (strcase name)))
+    T
+    (progn
+      (setq data (tblsearch "LAYER" name))
+      (if (not data)
+        (progn
+          (setq object (vl-catch-all-apply 'vla-add (list (chlay:layers) name)))
+          (setq data (if (not (vl-catch-all-error-p object)) (tblsearch "LAYER" name)))
+          (if data (setq *chlay-changed* T))))
+      (if (and data *chlay-context*)
+        (setq *chlay-verified-layers* (chlay:map-put *chlay-verified-layers* (strcase name) T)))
+      (if data T nil)))
+)
+(defun chlay:ensure-all-predefined-layers (/ doc layers ltypes definition name props ename data obj color ltype plot err tc)
+  (vl-load-com)
+  (setq doc (chlay:doc) layers (chlay:layers) ltypes (vla-get-linetypes doc))
+  (foreach definition *chlay-layer-definitions*
+    (setq name (car definition) props (cdr definition)
+          ename (tblobjname "LAYER" name)
+          data (if ename (entget ename))
+          color (cdr (assoc 62 props)) ltype (cdr (assoc 6 props))
+          plot (if (= (cdr (assoc "Plot" props)) "No") 0 1) obj nil)
+    (if (not data)
+      (progn (setq obj (vla-add layers name)) (setq ename (tblobjname "LAYER" name) data (entget ename) *chlay-changed* T)))
+    (if (not (tblsearch "LTYPE" ltype))
+      (progn
+        (vl-catch-all-apply 'vla-load (list ltypes ltype "acadiso.lin"))
+        (if (not (tblsearch "LTYPE" ltype))
+          (vl-catch-all-apply 'vla-load (list ltypes ltype "acad.lin")))))
+    ;; A leitura DXF evita obter/escrever objetos COM quando já estão corretos.
+    (if (or (/= (abs (cdr (assoc 62 data))) color) (assoc 420 data)
+            (/= (strcase (cdr (assoc 6 data))) (strcase ltype))
+            (/= (if (assoc 290 data) (cdr (assoc 290 data)) 1) plot))
+      (progn
+        (if (not obj) (setq obj (vla-item layers name)))
+        (if (assoc 420 data)
+          (progn
+            (setq tc (vla-get-TrueColor obj))
+            (vla-put-ColorMethod tc 194)
+            (vla-put-ColorIndex tc color)
+            (vla-put-TrueColor obj tc))
+          (if (/= (abs (cdr (assoc 62 data))) color)
+            (vla-put-color obj color)))
+        (if (and (/= (strcase (cdr (assoc 6 data))) (strcase ltype)) (tblsearch "LTYPE" ltype))
+          (vla-put-linetype obj ltype))
+        (if (/= (if (assoc 290 data) (cdr (assoc 290 data)) 1) plot)
+          (vla-put-plottable obj (if (= plot 0) :vlax-false :vlax-true)))
+        (setq *chlay-changed* T)))
+    (if *chlay-context*
+      (setq *chlay-verified-layers* (chlay:map-put *chlay-verified-layers* (strcase name) T)))
   )
   (setvar "LTSCALE" 0.03)
   (setvar "CLAYER" "0")
   (princ)
 )
 
-;; Comando automático CHLAUTO: limpa a seleção deletando elementos das camadas configuradas, remapeando para o padrão PP e limpando hachuras extras
+;; Restauração comum, inclusive quando ocorrer erro ou cancelamento.
+(defun chlay:finish-operation (failed / item)
+  (foreach item *chlay-saved-vars*
+    (if (or failed (not (member (car item) '("LTSCALE" "CLAYER"))))
+      (vl-catch-all-apply 'setvar (list (car item) (cdr item)))))
+  (if *chlay-undo-open*
+    (progn
+      (vl-catch-all-apply 'vla-EndUndoMark (list (chlay:doc)))
+      (setq *chlay-undo-open* nil)))
+  (if *chlay-changed* (vl-catch-all-apply 'vla-Regen (list (chlay:doc) 0)))
+)
+(defun chlay:with-operation (function args standardize /
+    *error* *chlay-context* *chlay-saved-vars* *chlay-undo-open* *chlay-changed*
+    *chlay-verified-layers* *chlay-hatch-index* *chlay-index-entities* *chlay-index-ready*
+    *chlay-failures* *chlay-defer-hatches* *chlay-pending-hatches* name result doc)
+  (vl-load-com)
+  (setq doc (vla-get-activedocument (vlax-get-acad-object))
+        *chlay-context* (list doc (vla-get-layers doc)) *chlay-failures* 0)
+  (foreach name '("CMDECHO" "HIGHLIGHT" "CETRANSPARENCY" "LTSCALE" "CLAYER")
+    (setq *chlay-saved-vars* (cons (cons name (getvar name)) *chlay-saved-vars*)))
+  (defun *error* (message)
+    (chlay:finish-operation T)
+    (prompt (strcat "\n[CHLAY] Operação interrompida: " message)) (princ))
+  (setq result
+    (vl-catch-all-apply
+      '(lambda ()
+        (vla-StartUndoMark doc) (setq *chlay-undo-open* T)
+        (setvar "CMDECHO" 0) (setvar "HIGHLIGHT" 0)
+        (if standardize (chlay:ensure-all-predefined-layers))
+        (apply function args))))
+  (chlay:finish-operation (vl-catch-all-error-p result))
+  (cond
+    ((vl-catch-all-error-p result)
+      (prompt (strcat "\n[CHLAY] Operação interrompida: " (vl-catch-all-error-message result))) nil)
+    (T
+      (if (> *chlay-failures* 0)
+        (prompt (strcat "\n[CHLAY] " (itoa *chlay-failures*) " objeto(s) não puderam ser alterados.")))
+      result))
+)
+(defun chlay:failed ()
+  (setq *chlay-failures* (1+ (if *chlay-failures* *chlay-failures* 0))) nil
+)
+(defun chlay:delete-entity (ent / result)
+  (setq result (vl-catch-all-apply 'entdel (list ent)))
+  (if (and result (not (vl-catch-all-error-p result)))
+    (progn (setq *chlay-changed* T) T) (chlay:failed))
+)
+(defun chlay:close-polyline (ent / data flags)
+  (if (and (setq data (entget ent)) (member (cdr (assoc 0 data)) '("LWPOLYLINE" "POLYLINE"))
+           (setq flags (cdr (assoc 70 data))) (= 0 (logand flags 1))
+           (= 0 (logand flags 80)))
+    (if (/= 0 (logand 4 (cdr (assoc 70 (tblsearch "LAYER" (cdr (assoc 8 data)))))))
+      (chlay:failed)
+      (if (entmod (subst (cons 70 (logior flags 1)) (assoc 70 data) data))
+        (progn (setq *chlay-changed* T) T) (chlay:failed))))
+)
+
+;; Um único entmod para entidades comuns. O fallback ActiveX é reservado
+;; a objetos que não aceitam a alteração DXF. Nunca apagar o original antes
+;; de confirmar a camada da cópia e a remoção bem-sucedida do original.
+(defun chlay:move-vla (ent target / obj copy result)
+  (setq obj (vlax-ename->vla-object ent)
+        result (vl-catch-all-apply 'vla-put-layer (list obj target)))
+  (if (vl-catch-all-error-p result)
+    (progn
+      (setq copy (vl-catch-all-apply 'vla-Copy (list obj)))
+      (if (not (vl-catch-all-error-p copy))
+        (progn
+          (setq result (vl-catch-all-apply 'vla-put-layer (list copy target)))
+          (if (and (not (vl-catch-all-error-p result)) (= (strcase (vla-get-layer copy)) (strcase target)))
+            (progn
+              (setq result (vl-catch-all-apply 'vla-Delete (list obj)))
+              (if (not (vl-catch-all-error-p result)) (setq obj copy)
+                (progn (vl-catch-all-apply 'vla-Delete (list copy)) (setq obj nil))))
+            (progn (vl-catch-all-apply 'vla-Delete (list copy)) (setq obj nil))))
+        (setq obj nil))))
+  (if obj
+    (progn
+      (vl-catch-all-apply 'vla-put-color (list obj 256))
+      (vl-catch-all-apply 'vla-put-linetype (list obj "ByLayer"))
+      (vl-catch-all-apply 'vla-put-linetypescale (list obj 1.0))
+      (vl-catch-all-apply 'vla-put-lineweight (list obj -1))
+      (vlax-vla-object->ename obj)))
+)
+(defun chlay:target-has-hatch-format-p (target / def)
+  (setq target (chlay:get-canonical-layer target))
+  (or (= (strcase target) "PP_PILAR")
+      (and (setq def (assoc target *chlay-layer-definitions*))
+           (assoc "HatchPattern" (cdr def))))
+)
+(defun chlay:move-entity-data (ent target data / pair code updated result layer-data)
+  (setq target (chlay:get-canonical-layer target))
+  (if (and (chlay:ensure-target-layer target)
+           (= 0 (logand 4 (cdr (assoc 70 (tblsearch "LAYER" (cdr (assoc 8 data)))))))
+           (= 0 (logand 4 (cdr (assoc 70 (tblsearch "LAYER" target))))))
+    (progn
+      (foreach pair data
+        (setq code (car pair))
+        (if (not (member code '(420 430)))
+          (setq updated
+            (cons (cond ((= code 8) (cons 8 target)) ((= code 62) '(62 . 256))
+                    ((= code 6) '(6 . "ByLayer")) ((= code 48) '(48 . 1.0))
+                    ((= code 370) '(370 . -1)) (T pair)) updated))))
+      (setq updated (reverse updated))
+      (setq result (if (equal data updated) ent (vl-catch-all-apply 'entmod (list updated))))
+      (if (or (not result) (vl-catch-all-error-p result))
+        (setq ent (chlay:move-vla ent target)))
+      (if ent
+        (progn
+          (setq *chlay-changed* T)
+          (if (and (= (cdr (assoc 0 data)) "HATCH")
+                   (chlay:target-has-hatch-format-p target))
+            (if *chlay-defer-hatches*
+              (setq *chlay-pending-hatches* (cons ent *chlay-pending-hatches*))
+              (chlay:format-hatch ent target)))
+          ent)
+        (chlay:failed)))
+    (chlay:failed))
+)
+(defun chlay:move-entity (ent target / data)
+  (if (and ent target (/= target "") (setq data (entget ent)))
+    (chlay:move-entity-data ent target data))
+)
+
+
+(defun chlay:replace-str (str old new / pos)
+  (while (setq pos (vl-string-search old str))
+    (setq str (strcat (substr str 1 pos) new (substr str (+ pos (strlen old) 1))))
+  )
+  str
+)
+
+(defun chlay:get-base-layer (lay_name / pos)
+  (setq lay_name (strcase lay_name))
+  ;; 1. Remover prefixo de XREF padrão AutoCAD (ex: "01_BASE|I-FURN" -> "I-FURN")
+  (if (setq pos (vl-string-search "|" lay_name))
+    (while (setq pos (vl-string-search "|" lay_name))
+      (setq lay_name (substr lay_name (+ pos 2)))
+    )
+  )
+  ;; 2. Remover prefixo de XREF com bind $0$ (ex: "01_BASE$0$I-FURN" -> "I-FURN")
+  (if (setq pos (vl-string-search "$0$" lay_name))
+    (while (setq pos (vl-string-search "$0$" lay_name))
+      (setq lay_name (substr lay_name (+ pos 4)))
+    )
+  )
+  ;; 3. Remover prefixo $ genérico (ex: "01_BASE$I-FURN" -> "I-FURN")
+  (if (setq pos (vl-string-search "$" lay_name))
+    (while (setq pos (vl-string-search "$" lay_name))
+      (setq lay_name (substr lay_name (+ pos 2)))
+    )
+  )
+  lay_name
+)
+
+;; Padrões preparados uma vez; a ordem de prioridade das regras é preservada.
+(defun chlay:compile-pattern (pattern / normalized kind variants position)
+  (setq normalized (vl-string-trim " \t\r\n" (strcase pattern)))
+  (cond
+    ((= normalized "0") (list normalized "ZERO" nil))
+    ((setq position (vl-string-search "$0$" normalized))
+      (list normalized "BOUND" (list (strcat "*" normalized) (substr normalized (+ position 4)))))
+    (T
+      (setq variants (list normalized))
+      (cond
+        ((vl-string-search "____" normalized)
+          (setq variants (append variants
+            (list (chlay:replace-str normalized "____" "*")
+              (chlay:replace-str normalized "-____-" "*")
+              (chlay:replace-str normalized "-____" "*")
+              (chlay:replace-str normalized "____-" "*")))))
+        ((vl-string-search "---" normalized)
+          (setq variants (append variants (list (strcat (chlay:replace-str normalized "---" "*") "*"))))))
+      (list normalized "MATCH" variants)))
+)
+(defun chlay:prepared-pattern (pattern / entry compiled)
+  (if (setq entry (chlay:map-get *chlay-pattern-cache* pattern)) (cdr entry)
+    (progn
+      (setq compiled (chlay:compile-pattern pattern)
+            *chlay-pattern-cache* (chlay:map-put *chlay-pattern-cache* pattern compiled))
+      compiled))
+)
+(defun chlay:match-prepared (full base compiled / variants pattern matched)
+  (cond
+    ((= (cadr compiled) "ZERO") (or (= full "0") (= base "0")))
+    ((= (cadr compiled) "BOUND")
+      (or (wcmatch full (car (caddr compiled))) (= base (cadr (caddr compiled)))))
+    (T
+      (setq variants (caddr compiled))
+      (while (and variants (not matched))
+        (setq pattern (car variants))
+        (setq matched (or (= full pattern) (= base pattern) (wcmatch full pattern) (wcmatch base pattern)))
+        (setq variants (cdr variants)))
+      matched))
+)
+(defun chlay:fast-match-p (full base pattern)
+  (chlay:match-prepared full base (chlay:prepared-pattern pattern))
+)
+(defun chlay:layer-matches-p (layer pattern)
+  (chlay:fast-match-p (vl-string-trim " \t\r\n" (strcase layer))
+    (vl-string-trim " \t\r\n" (chlay:get-base-layer layer)) pattern)
+)
+(defun chlay:rules-delete () *chlay-rules-delete*)
+(defun chlay:rules-map () *chlay-rules-map*)
+(defun chlay:compile-rules (/ rule)
+  (setq *chlay-pattern-cache* nil
+        *chlay-compiled-delete* (mapcar 'chlay:prepared-pattern *chlay-rules-delete*)
+        *chlay-compiled-map* (mapcar '(lambda (rule) (cons (chlay:prepared-pattern (car rule)) (cdr rule)))
+          *chlay-rules-map*))
+)
+
+
+(defun chlay:resolve-layer-action (lay rules_del rules_mp / str_lay base_lay del_found target del_pat map_entry remaining)
+  (setq str_lay (vl-string-trim " \t\r\n" (strcase lay)))
+  (setq base_lay (vl-string-trim " \t\r\n" (chlay:get-base-layer lay)))
+
+  (cond
+    ;; Condicional 1: MobiliÃ¡rio / I-FURN -> apaga hachuras; outros elementos vÃ£o para PP_LAYOUT
+    ((or (chlay:fast-match-p str_lay base_lay "I-FURN")
+         (chlay:fast-match-p str_lay base_lay "*FURN*")
+         (chlay:fast-match-p str_lay base_lay "MÃ“VEIS")
+         (chlay:fast-match-p str_lay base_lay "MOVEIS")
+         (chlay:fast-match-p str_lay base_lay "*MOB*"))
+     (cons "COND_FURN" "PP_LAYOUT")
+    )
+
+    ;; Condicional 2: A-DETL-GENF -> hachuras vÃ£o para PP_FORRO; outros elementos vÃ£o para PP_EQUIPAMENTO
+    ((or (chlay:fast-match-p str_lay base_lay "A-DETL-GENF")
+         (chlay:fast-match-p str_lay base_lay "*DETL-GENF*")
+         (chlay:fast-match-p str_lay base_lay "*GENF*"))
+     (cons "COND_GENF" "PP_EQUIPAMENTO")
+    )
+
+    ;; Condicional 3: TEXTO3 -> apaga apenas TEXT simples; MTEXT vai para PP_TEXTO APOIO
+    ((chlay:fast-match-p str_lay base_lay "TEXTO3")
+     (cons "COND_TEXTO3" "PP_TEXTO APOIO")
+    )
+
+    ;; Condicional 4: VAZIO -> apaga apenas HATCH; linhas/polilinhas vÃ£o para PP_LAYOUT
+    ((chlay:fast-match-p str_lay base_lay "VAZIO")
+     (cons "COND_VAZIO" "PP_LAYOUT")
+    )
+
+    ;; Condicional 5: A-AREA-IDEN -> move para PP_TEXTO (evita ser capturado por regras de exclusÃ£o de IDEN)
+    ((or (chlay:fast-match-p str_lay base_lay "A-AREA-IDEN")
+         (chlay:fast-match-p str_lay base_lay "*AREA-IDEN*")
+         (chlay:fast-match-p str_lay base_lay "*AREA*IDEN*"))
+     (cons "MOVE" "PP_TEXTO")
+    )
+
+    ;; Condicional 6: A-DETL-MBND / Vagas de Garagem -> apaga hachuras e textos; linhas/polilinhas vÃ£o para PP_GARAGEM
+    ((or (chlay:fast-match-p str_lay base_lay "A-DETL-MBND")
+         (chlay:fast-match-p str_lay base_lay "A-DETL-____-MBND")
+         (chlay:fast-match-p str_lay base_lay "*DETL*MBND*")
+         (chlay:fast-match-p str_lay base_lay "A-DETL-*-MBND"))
+     (cons "COND_MBND" "PP_GARAGEM")
+    )
+
+    ;; Condicional 7: Selos de Zona -> textos e blocos vÃ£o para PP_TEXTO, linhas/polilinhas/hachuras sÃ£o apagadas
+    ((or (chlay:fast-match-p str_lay base_lay "Selos de Zona*")
+         (chlay:fast-match-p str_lay base_lay "*Selos de Zona*")
+         (chlay:fast-match-p str_lay base_lay "*Selo*Zona*"))
+     (cons "COND_ZON_TEXT" "PP_TEXTO")
+    )
+
+    ;; Condicional 8: Zonas (ZON _ Ambiente, ZON _ Ãreas e PerÃ­metros) -> textos e blocos vÃ£o para PP_TEXTO APOIO, linhas/polilinhas/hachuras sÃ£o apagadas
+    ((and (or (chlay:fast-match-p str_lay base_lay "ZON _ *")
+              (chlay:fast-match-p str_lay base_lay "*ZON _ Ambiente*")
+              (chlay:fast-match-p str_lay base_lay "*ZON _ *rea*")
+              (chlay:fast-match-p str_lay base_lay "*ZON*"))
+          (not (chlay:fast-match-p str_lay base_lay "*APTO PCD*ZON*")))
+     (cons "COND_ZON_APOIO" "PP_TEXTO APOIO")
+    )
+
+    ;; Caso padrÃ£o: verificar regras de exclusÃ£o e depois remapeamento
+    (t
+     (setq remaining (if rules_del (mapcar 'chlay:prepared-pattern rules_del) *chlay-compiled-delete*))
+     (while (and remaining (not del_found))
+       (setq del_found (chlay:match-prepared str_lay base_lay (car remaining)) remaining (cdr remaining)))
+     (if del_found (cons "DELETE" nil)
+       (progn
+         (setq remaining (if rules_mp
+           (mapcar '(lambda (item) (cons (chlay:prepared-pattern (car item)) (cdr item))) rules_mp)
+           *chlay-compiled-map*))
+         (while (and remaining (not target))
+           (setq map_entry (car remaining))
+           (if (chlay:match-prepared str_lay base_lay (car map_entry)) (setq target (cdr map_entry)))
+           (setq remaining (cdr remaining)))
+         (if target (cons "MOVE" target) (cons "NONE" nil))))
+    )
+  )
+)
+
+
+;; Chaves geométricas conservadoras, sem GetBoundingBox/Area por entidade.
+;; Incluem proprietário, elevação, normal, estilo e todos os contornos/ilhas.
+;; Não se apaga nada com base somente em limites ou área arredondados.
+(defun chlay:key-data (value)
+  (cond ((null value) nil)
+    ((numberp value) (rtos (if (equal value 0.0 1e-12) 0.0 value) 2 9))
+    ((listp value) (cons (chlay:key-data (car value)) (chlay:key-data (cdr value))))
+    (T value))
+)
+(defun chlay:ring-start (vertices / cursor smallest key best-tail best-prefix candidate)
+  (setq cursor vertices)
+  (while cursor
+    (setq key (vl-prin1-to-string (chlay:key-data (car cursor))))
+    (if (or (not smallest) (< key smallest)
+            (and (= key smallest)
+              (< (vl-prin1-to-string (chlay:key-data (append cursor (reverse candidate))))
+                 (vl-prin1-to-string (chlay:key-data (append best-tail (reverse best-prefix)))))))
+      (setq smallest key best-tail cursor best-prefix candidate))
+    (setq candidate (cons (car cursor) candidate) cursor (cdr cursor)))
+  (vl-prin1-to-string (chlay:key-data (append best-tail (reverse best-prefix))))
+)
+(defun chlay:ring-key (vertices / forward backward cursor next result)
+  (setq forward (chlay:ring-start vertices) backward (reverse vertices) cursor backward)
+  (while cursor
+    (setq next (if (cdr cursor) (cadr cursor) (car backward)))
+    (setq result (cons (list (caar cursor) (cadar cursor) (- (caddr next))) result)
+          cursor (cdr cursor)))
+  (setq backward (chlay:ring-start (reverse result)))
+  (if (< backward forward) backward forward)
+)
+(defun chlay:edge-vertex (edge / kind center radius start end direction sweep bulge)
+  (setq kind (cdr (assoc 72 edge)))
+  (cond
+    ((= kind 1) (list (list (cadr (assoc 10 edge)) (caddr (assoc 10 edge)) 0.0)
+                          (list (cadr (assoc 11 edge)) (caddr (assoc 11 edge)))))
+    ((= kind 2)
+      (setq center (cdr (assoc 10 edge)) radius (cdr (assoc 40 edge))
+            start (cdr (assoc 50 edge)) end (cdr (assoc 51 edge))
+            direction (cdr (assoc 73 edge)))
+      (setq sweep (if (= direction 1) (- end start) (- start end)))
+      (while (< sweep 0.0) (setq sweep (+ sweep (* 2.0 pi))))
+      (if (and (> sweep 1e-12) (< sweep (- (* 2.0 pi) 1e-12)))
+        (progn
+          (setq bulge (/ (sin (/ sweep 4.0)) (cos (/ sweep 4.0))))
+          (if (/= direction 1) (setq bulge (- bulge)))
+          (list (list (+ (car center) (* radius (cos start)))
+                      (+ (cadr center) (* radius (sin start))) bulge)
+                (list (+ (car center) (* radius (cos end)))
+                      (+ (cadr center) (* radius (sin end))))))))
+    (T nil))
+)
+(defun chlay:edge-ring (path / pair edge segments converted vertex previous first valid vertices)
+  (setq valid T)
+  (foreach pair path
+    (if (= (car pair) 72)
+      (progn
+        (if edge (setq segments (cons (reverse edge) segments)))
+        (setq edge (list pair)))
+      (if edge (setq edge (cons pair edge)))))
+  (if edge (setq segments (cons (reverse edge) segments)))
+  (foreach edge (reverse segments)
+    (setq converted (chlay:edge-vertex edge))
+    (if converted
+      (progn
+        (setq vertex (car converted))
+        (if (and previous (not (equal previous (list (car vertex) (cadr vertex)) 1e-8)))
+          (setq valid nil))
+        (if (not first) (setq first (list (car vertex) (cadr vertex))))
+        (setq vertices (cons vertex vertices) previous (cadr converted)))
+      (setq valid nil)))
+  (if (and valid first (equal first previous 1e-8)) (chlay:ring-key (reverse vertices)))
+)
+(defun chlay:boundary-key (poly vertices current / ring)
+  (cond (poly (list "POLY" (chlay:ring-key (reverse vertices))))
+    ((setq ring (chlay:edge-ring (reverse current))) (list "POLY" ring))
+    ;; Elipses e splines mantêm todos os dados das arestas; conservadoramente,
+    ;; ordens diferentes não são consideradas duplicatas sem prova geométrica.
+    (T (list "EDGES" (reverse current))))
+)
+(defun chlay:hatch-loops (data / rest pair code current loops vertices vertex poly)
+  (setq rest (cdr (member (assoc 91 data) data)))
+  (while (and rest (/= (caar rest) 75))
+    (setq pair (car rest) code (car pair))
+    (cond
+      ((= code 92)
+        (if current
+          (setq loops (cons (chlay:boundary-key poly vertices current) loops)))
+        (setq poly (/= 0 (logand (cdr pair) 2)) current (list '(92 . 0)) vertices nil))
+      ((and poly (= code 10))
+        (setq vertices (cons (list (cadr pair) (caddr pair) 0.0) vertices)))
+      ((and poly (= code 42))
+        (setq vertices (cons (list (caar vertices) (cadar vertices) (cdr pair)) (cdr vertices))))
+      ((and (not poly) (/= code 330)) (setq current (cons pair current)))
+    )
+    (setq rest (cdr rest)))
+  (if current
+    (setq loops (cons (chlay:boundary-key poly vertices current) loops)))
+  ;; vl-sort eliminaria ilhas repetidas; ordenar índices preserva multiplicidade.
+  (mapcar '(lambda (index) (nth index loops))
+    (vl-sort-i loops '(lambda (a b) (< (vl-prin1-to-string (chlay:key-data a))
+                                      (vl-prin1-to-string (chlay:key-data b))))))
+)
+(defun chlay:geometry-key (data elevation loops style / owner)
+  (setq owner (cdr (assoc 330 data)))
+  (if (and owner loops)
+    (vl-prin1-to-string
+      (chlay:key-data (list (cdr (assoc 5 (entget owner))) elevation
+        (if (assoc 210 data) (cdr (assoc 210 data)) '(0.0 0.0 1.0)) style loops))))
+)
+(defun chlay:hatch-sig-data (data)
+  (if (= (cdr (assoc 0 data)) "HATCH")
+    (chlay:geometry-key data (caddr (cdr (assoc 10 data)))
+      (chlay:hatch-loops data) (cdr (assoc 75 data))))
+)
+(defun chlay:get-hatch-sig (ent / data)
+  (if (and ent (setq data (entget ent))) (chlay:hatch-sig-data data))
+)
+(defun chlay:get-pline-sig (ent / data vertices pair vertex next vdata elevation)
+  (if (and ent (setq data (entget ent))
+           (member (cdr (assoc 0 data)) '("LWPOLYLINE" "POLYLINE"))
+           (/= 0 (logand (cdr (assoc 70 data)) 1))
+           (= 0 (logand (cdr (assoc 70 data)) 88)))
+    (progn
+      (if (= (cdr (assoc 0 data)) "LWPOLYLINE")
+        (progn
+          (setq elevation (if (assoc 38 data) (cdr (assoc 38 data)) 0.0))
+          (foreach pair data
+            (cond
+              ((= (car pair) 10) (setq vertices (cons (list (cadr pair) (caddr pair) 0.0) vertices)))
+              ((= (car pair) 42)
+                (setq vertices (cons (list (caar vertices) (cadar vertices) (cdr pair)) (cdr vertices)))))))
+        (progn
+          (setq elevation (caddr (cdr (assoc 10 data))) next (entnext ent))
+          (while (and next (setq vdata (entget next)) (/= (cdr (assoc 0 vdata)) "SEQEND"))
+            (setq vertex (cdr (assoc 10 vdata)))
+            (setq vertices (cons (list (car vertex) (cadr vertex)
+              (if (assoc 42 vdata) (cdr (assoc 42 vdata)) 0.0)) vertices) next (entnext next)))))
+      (if (> (length vertices) 1)
+        (chlay:geometry-key data elevation (list (list "POLY" (chlay:ring-key (reverse vertices)))) 0))))
+)
+
+(defun chlay:set-transparency (ent value / data alpha code pair)
+  (if (and ent (setq data (entget ent)))
+    (progn
+      (if (not (numberp value)) (setq value (atoi value)))
+      (if (and (>= value 0) (<= value 90))
+        (progn
+          (setq alpha (fix (* (- 100 value) 2.55)) code (+ 33554432 alpha) pair (assoc 440 data))
+          (if (/= (cdr pair) code)
+            (if (entmod (if pair (subst (cons 440 code) pair data) (append data (list (cons 440 code)))))
+              (setq *chlay-changed* T)))))))
+)
+(defun chlay:apply-hatch-style (ent pattern scale transparency / object changed background result cur-name)
+  (setq result
+    (vl-catch-all-apply
+      '(lambda ()
+        (setq object (vlax-ename->vla-object ent))
+        (if pattern
+          (progn
+            (setq cur-name (strcase (vla-get-PatternName object)))
+            (if (/= cur-name (strcase pattern))
+              (progn
+                (vla-SetPattern object 1 pattern)
+                (vla-put-PatternAngle object 0.0)
+                (if scale (vla-put-PatternScale object scale))
+                (setq changed T))
+              (progn
+                (if (/= (vla-get-PatternAngle object) 0.0)
+                  (progn (vla-put-PatternAngle object 0.0) (setq changed T)))
+                (if (and scale (/= (vla-get-PatternScale object) scale))
+                  (progn (vla-put-PatternScale object scale) (setq changed T)))))))
+        (if changed (progn (vla-Evaluate object) (setq *chlay-changed* T)))
+        (vl-catch-all-apply 'vla-put-color (list object 256))
+        (vl-catch-all-apply
+          '(lambda ()
+            (setq background (vla-get-BackgroundColor object))
+            (if (and background
+                     (not (vl-catch-all-error-p background))
+                     (/= (vla-get-EntityColor background) -939524096))
+              (progn
+                (vla-put-EntityColor background -939524096)
+                (vla-put-BackgroundColor object background)
+                (setq *chlay-changed* T)))))
+        (if transparency (chlay:set-transparency ent transparency))
+        T)))
+  (if (vl-catch-all-error-p result) (chlay:failed) result)
+)
+(defun chlay:hatch-index-key-data (data / sig)
+  (if (setq sig (chlay:hatch-sig-data data))
+    (strcat (strcase (cdr (assoc 8 data))) ":" sig))
+)
+(defun chlay:hatch-index-key (ent / data)
+  (if (setq data (entget ent)) (chlay:hatch-index-key-data data))
+)
+(defun chlay:index-hatch (ent / key entry data handle previous)
+  (if (and (setq data (entget ent)) (setq key (chlay:hatch-index-key-data data)))
+    (progn
+      (setq handle (cdr (assoc 5 data)) previous (chlay:map-get *chlay-index-entities* handle))
+      (if (not (equal (cdr previous) key))
+        (progn
+          (if previous
+            (setq *chlay-hatch-index* (chlay:map-put *chlay-hatch-index* (cdr previous)
+              (vl-remove ent (cdr (chlay:map-get *chlay-hatch-index* (cdr previous)))))))
+          (setq entry (chlay:map-get *chlay-hatch-index* key)
+                *chlay-hatch-index* (chlay:map-put *chlay-hatch-index* key (cons ent (cdr entry)))
+                *chlay-index-entities* (chlay:map-put *chlay-index-entities* handle key))))
+    ))
+)
+(defun chlay:ensure-hatch-index (/ selection i)
+  (if (not *chlay-index-ready*)
+    (progn
+      (setq *chlay-hatch-index* nil *chlay-index-entities* nil
+            selection (ssget "_X" '((0 . "HATCH") (8 . "PP_PILAR"))) i 0)
+      (if selection
+        (while (< i (sslength selection))
+          (chlay:index-hatch (ssname selection i)) (setq i (1+ i))))
+      (setq *chlay-index-ready* T)))
+)
+(defun chlay:above (top bottom / owner dictionary table array)
+  (vl-catch-all-apply
+    '(lambda ()
+      (setq owner (vlax-ename->vla-object (cdr (assoc 330 (entget bottom))))
+            dictionary (vla-GetExtensionDictionary owner)
+            table (vl-catch-all-apply 'vla-GetObject (list dictionary "ACAD_SORTENTS")))
+      (if (vl-catch-all-error-p table)
+        (setq table (vla-AddObject dictionary "ACAD_SORTENTS" "AcDbSortentsTable")))
+      (setq array (vlax-make-safearray vlax-vbObject '(0 . 0)))
+      (vlax-safearray-put-element array 0 (vlax-ename->vla-object top))
+      (vla-MoveAbove table array (vlax-ename->vla-object bottom))))
+)
+(defun chlay:pilar-pair (entities / ent solid ansi spare copy data pattern)
+  (foreach ent entities
+    (if (setq data (entget ent))
+      (progn
+        (setq pattern (strcase (cdr (assoc 2 data))))
+        (cond
+          ((and (not solid) (= pattern "SOLID")) (setq solid ent))
+          ((and (not ansi) (= pattern "ANSI37")) (setq ansi ent))
+          (T (setq spare (cons ent spare)))))))
+  (if (not solid)
+    (if spare (setq solid (car spare) spare (cdr spare)) (setq solid ansi ansi nil)))
+  (if (and (not ansi) spare) (setq ansi (car spare)))
+  (if (and solid (chlay:apply-hatch-style solid "SOLID" nil 80))
+    (progn
+      (if (not ansi)
+        (progn
+          (setq copy (vl-catch-all-apply 'vla-Copy (list (vlax-ename->vla-object solid))))
+          (if (not (vl-catch-all-error-p copy)) (setq ansi (vlax-vla-object->ename copy)))))
+      (if (and ansi (chlay:apply-hatch-style ansi "ANSI37" 0.03 0))
+        (progn (chlay:above ansi solid) (list solid ansi)))))
+)
+(defun chlay:format-pilar (ent / key entities pair)
+  (chlay:ensure-hatch-index)
+  (chlay:index-hatch ent)
+  (setq key (chlay:hatch-index-key ent))
+  (if (and key (setq entities (cdr (chlay:map-get *chlay-hatch-index* key)))
+           (setq pair (chlay:pilar-pair entities)))
+    (progn
+      (foreach ent pair (chlay:index-hatch ent))
+      pair))
+)
+(defun chlay:format-pilar-isolated (ent / *chlay-hatch-index* *chlay-index-entities* *chlay-index-ready*)
+  (chlay:format-pilar ent)
+)
+(defun chlay:format-hatch (ent name / definition props)
+  (setq name (chlay:get-canonical-layer name))
+  (if (= (strcase name) "PP_PILAR")
+    (if *chlay-context* (chlay:format-pilar ent) (chlay:format-pilar-isolated ent))
+    (if (setq definition (assoc name *chlay-layer-definitions*))
+      (progn
+        (setq props (cdr definition))
+        (chlay:apply-hatch-style ent (cdr (assoc "HatchPattern" props))
+          (cdr (assoc "HatchScale" props)) (cdr (assoc "HatchTransparency" props))))))
+)
+(defun chlay:flush-hatches (/ ent processed key data)
+  (foreach ent (reverse *chlay-pending-hatches*)
+    (if (and (setq data (entget ent)) (setq key (chlay:hatch-index-key-data data))
+             (not (chlay:map-get processed key)))
+      (progn
+        (chlay:format-hatch ent (cdr (assoc 8 data)))
+        (setq processed (chlay:map-put processed key T)))))
+  (setq *chlay-pending-hatches* nil)
+)
+
+;; selection=nil significa limpeza explicitamente global; os comandos com
+;; seleção passam seu conjunto de trabalho e não alteram outros locais/layouts.
+(defun chlay:deduplicate-selection (selection target / tree i ent key entry group pair keep name total data)
+  (setq total 0 i 0)
+  (if selection
+    (while (< i (sslength selection))
+      (setq ent (ssname selection i))
+      (if (and (setq data (entget ent)) (= (cdr (assoc 0 data)) "HATCH")
+               (or (not target) (= (strcase target) (strcase (cdr (assoc 8 data)))))
+               (wcmatch (strcase (cdr (assoc 8 data))) "PP_*")
+               (setq key (chlay:hatch-index-key-data data)))
+        (progn
+          (setq entry (chlay:map-get tree key))
+          (setq tree (chlay:map-put tree key (cons ent (cdr entry))))))
+      (setq i (1+ i))))
+  (foreach entry (chlay:map-items tree)
+    (setq group (cdr entry) name (cdr (assoc 8 (entget (car group)))))
+    (setq keep
+      (if (= (strcase name) "PP_PILAR") (chlay:pilar-pair group)
+        (if (chlay:format-hatch (car group) name) (list (car group)))))
+    ;; Só excluir depois de confirmar que as hachuras preservadas são válidas.
+    (if keep
+      (foreach ent group
+        (if (and (not (member ent keep)) (chlay:delete-entity ent)) (setq total (1+ total))))))
+  total
+)
+(defun chlay:deduplicate-hatches (target / selection)
+  (setq selection (ssget "_X" (if target (list '(0 . "HATCH") (cons 8 target)) '((0 . "HATCH") (8 . "PP_*")))))
+  (chlay:deduplicate-selection selection target)
+)
+(defun chlay:create-polyline-hatch (ent / data owner hatch loop result)
+  (if (chlay:get-pline-sig ent)
+    (progn
+      (setq data (entget ent) owner (vlax-ename->vla-object (cdr (assoc 330 data))))
+      (setq result
+        (vl-catch-all-apply
+          '(lambda ()
+            (setq hatch (vla-AddHatch owner 1 "SOLID" :vlax-false)
+                  loop (vlax-make-safearray vlax-vbObject '(0 . 0)))
+            (vlax-safearray-put-element loop 0 (vlax-ename->vla-object ent))
+            (vla-AppendOuterLoop hatch loop) (vla-Evaluate hatch)
+            (if (> (vla-get-Area hatch) 0.0) (vlax-vla-object->ename hatch)
+              (progn (vla-Delete hatch) (setq hatch nil) nil)))))
+      (if (vl-catch-all-error-p result)
+        (progn (if hatch (vl-catch-all-apply 'vla-Delete (list hatch))) (chlay:failed))
+        result)))
+)
+
+
+;; A decisão por tipo de entidade é compartilhada por CHLAUTO e CHLDEL.
+(defun chlay:entity-action (action kind layer / code target erase)
+  (setq code (car action) target (cdr action))
+  (cond
+    ((= code "DELETE") action)
+    ((= code "COND_FURN") (cons (if (= kind "HATCH") "DELETE" "MOVE") "PP_LAYOUT"))
+    ((= code "COND_GENF") (cons "MOVE" (if (= kind "HATCH") "PP_FORRO" "PP_EQUIPAMENTO")))
+    ((= code "COND_TEXTO3") (cons (if (= kind "TEXT") "DELETE" "MOVE") "PP_TEXTO APOIO"))
+    ((= code "COND_VAZIO") (cons (if (= kind "HATCH") "DELETE" "MOVE") "PP_LAYOUT"))
+    ((= code "COND_MBND")
+      (cons (if (member kind '("HATCH" "TEXT" "MTEXT" "MULTILEADER" "LEADER")) "DELETE" "MOVE") "PP_GARAGEM"))
+    ((member code '("COND_ZON_TEXT" "COND_ZON_APOIO"))
+      (cons (if (member kind '("TEXT" "MTEXT" "INSERT" "MULTILEADER" "LEADER")) "MOVE" "DELETE") target))
+    ((= code "MOVE")
+      (if (or (and (= (strcase target) "PP_GARAGEM") (/= (strcase layer) "PP_GARAGEM")
+                   (member kind '("HATCH" "TEXT" "MTEXT" "MULTILEADER" "LEADER")))
+              (and (= (strcase target) "PP_LAYOUT") (/= (strcase layer) "PP_LAYOUT") (= kind "HATCH")))
+        (cons "DELETE" nil) action))
+    (T action))
+)
+(defun chlay:process-selection (selection delete-only / i size ent data layer kind cache entry action original-action deleted moved ignored target moved-ent ready)
+  (setq i 0 size (sslength selection) deleted 0 moved 0 ignored 0 *chlay-defer-hatches* T)
+  (sssetfirst nil nil)
+  (while (< i size)
+    (setq ent (ssname selection i))
+    (if (setq data (entget ent))
+      (progn
+        (setq layer (cdr (assoc 8 data)) kind (cdr (assoc 0 data))
+              entry (chlay:map-get cache (strcase layer)))
+        (if (not entry)
+          (progn
+            (setq action (chlay:resolve-layer-action layer nil nil)
+                  cache (chlay:map-put cache (strcase layer) action)))
+          (setq action (cdr entry)))
+        (setq original-action action action (chlay:entity-action action kind layer))
+        (cond
+          ((= (car action) "DELETE")
+            (if (chlay:delete-entity ent) (setq deleted (1+ deleted))))
+          (delete-only (setq ignored (1+ ignored)))
+          ((= (car action) "MOVE")
+            (setq target (cdr action) ready (= (strcase layer) (strcase target)))
+            ;; Condições especiais historicamente também redefinem ByLayer em
+            ;; objetos já na camada; MOVE simples preserva essas propriedades.
+            (if (or (/= (strcase layer) (strcase target))
+                    (/= (car original-action) "MOVE"))
+              (if (setq moved-ent (chlay:move-entity-data ent target data))
+                (setq moved (1+ moved) ent moved-ent ready T)
+                (setq ready nil)))
+            (if (and ready (= (strcase target) "PP_PILAR")) (chlay:close-polyline ent)))
+          (T (setq ignored (1+ ignored))))))
+    (setq i (1+ i)))
+  (chlay:flush-hatches)
+  (if delete-only
+    (prompt (strcat "\n[CHLDEL] Exclusão concluída: " (itoa deleted) " objeto(s) excluído(s), "
+                    (itoa ignored) " mantido(s)."))
+    (prompt (strcat "\n[CHLAUTO] Limpeza concluída: " (itoa moved) " objeto(s) modificado(s), "
+                    (itoa deleted) " excluído(s), " (itoa ignored) " ignorado(s).")))
+  (list moved deleted ignored)
+)
+(defun chlay:clean-selection (selection)
+  (if selection (chlay:with-operation 'chlay:process-selection (list selection nil) T))
+  (princ)
+)
+(defun chlay:delete-selection (selection)
+  (if selection (chlay:with-operation 'chlay:process-selection (list selection T) nil))
+  (princ)
+)
+(defun chlay:selection-with-pairs (selection / output i ent key entry related processed data)
+  (chlay:ensure-hatch-index)
+  (setq output (ssadd) i 0)
+  (while (< i (sslength selection))
+    (setq ent (ssname selection i))
+    (if (setq data (entget ent))
+      (progn
+        (ssadd ent output)
+        (if (and (= (cdr (assoc 0 data)) "HATCH")
+                 (= (strcase (cdr (assoc 8 data))) "PP_PILAR")
+                 (setq key (chlay:hatch-index-key-data data))
+                 (not (chlay:map-get processed key)))
+          (progn
+            (setq entry (chlay:map-get *chlay-hatch-index* key)
+                  processed (chlay:map-put processed key T))
+            (foreach related (cdr entry)
+              (if (entget related) (ssadd related output)))))))
+    (setq i (1+ i)))
+  output
+)
+(defun chlay:apply-layer-body (selection name / i ent data count)
+  (setq name (chlay:get-canonical-layer name) i 0 *chlay-defer-hatches* T)
+  (while (< i (sslength selection))
+    (setq ent (ssname selection i))
+    (if (setq data (entget ent)) (chlay:move-entity-data ent name data))
+    (setq i (1+ i)))
+  (chlay:flush-hatches)
+  (if (= (strcase name) "PP_PILAR")
+    (progn
+      (setq count (chlay:deduplicate-selection (chlay:selection-with-pairs selection) name))
+      (if (> count 0) (prompt (strcat "\n[CHL] " (itoa count) " hachura(s) duplicada(s) removida(s).")))))
+  T
+)
+(defun chlay:apply-layer (selection name)
+  (if (and selection name (/= name ""))
+    (chlay:with-operation 'chlay:apply-layer-body (list selection name) T))
+  (princ)
+)
+(defun chlay:hatch-selection (selection / work i ent data kind sig entry hatch closed created deleted)
+  (setq work (ssadd) i 0 closed 0 created 0 *chlay-defer-hatches* T)
+  (chlay:ensure-hatch-index)
+  (while (< i (sslength selection))
+    (setq ent (ssname selection i) data (entget ent))
+    (if data
+      (progn
+        (setq kind (cdr (assoc 0 data)))
+        (if (and (= kind "HATCH") (wcmatch (strcase (cdr (assoc 8 data))) "PP_*"))
+          (ssadd ent work))
+        (if (and (= (strcase (cdr (assoc 8 data))) "PP_PILAR")
+                 (member kind '("LWPOLYLINE" "POLYLINE")))
+          (progn
+            (if (chlay:close-polyline ent) (setq closed (1+ closed)))
+            (if (setq sig (chlay:get-pline-sig ent))
+              (progn
+                (setq entry (chlay:map-get *chlay-hatch-index* (strcat "PP_PILAR:" sig)))
+                (if entry
+                  (foreach hatch (cdr entry) (if (entget hatch) (ssadd hatch work)))
+                  (if (setq hatch (chlay:create-polyline-hatch ent))
+                    (progn
+                      (if (chlay:move-entity hatch "PP_PILAR")
+                        (progn
+                          (chlay:index-hatch hatch) (ssadd hatch work)
+                          (setq created (1+ created)))))))))))))
+    (setq i (1+ i)))
+  (chlay:flush-hatches)
+  (setq deleted (chlay:deduplicate-selection (chlay:selection-with-pairs work) nil))
+  (prompt (strcat "\n[CHLHATCH] Concluído: " (itoa closed) " polilinha(s) fechada(s), "
+    (itoa created) " nova(s) hachura(s) de pilar criada(s), " (itoa deleted) " hachura(s) removida(s)."))
+  (list closed created deleted)
+)
+(defun c:CHLHATCH (/ selection)
+  (prompt "\n[CHLHATCH] Selecione pilares/hachuras (ou ENTER para todo o ModelSpace): ")
+  (setq selection (ssget "_I"))
+  (if (not selection) (setq selection (ssget)))
+  (if (not selection) (setq selection (ssget "_X" '((410 . "Model")))))
+  (if selection (chlay:with-operation 'chlay:hatch-selection (list selection) T))
+  (princ)
+)
+(defun c:LBR () (c:CHLAUTO))
+(defun c:CDEL () (c:CHLDEL))
+(defun c:CD () (c:CHLDEL))
+(defun chlay:layers-message ()
+  (prompt "\n[PPLAYERS] Camadas PP restauradas e padronizadas.") T)
+(defun c:PPLAYERS () (chlay:with-operation 'chlay:layers-message nil T) (princ))
+(defun c:PPRESET () (c:PPLAYERS))
+(defun chlay:overkill-body (/ selection)
+  (if (setq selection (ssget "_X" '((410 . "Model"))))
+    (progn (vl-cmdf "._-OVERKILL" selection "" "") (setq *chlay-changed* T)))
+  (prompt "\n[CHOVERKILL] Limpeza de sobreposições concluída.") T)
+(defun c:CHOVERKILL () (chlay:with-operation 'chlay:overkill-body nil T) (princ))
+(defun chlay:order-body (/ layer selection)
+  (foreach layer '("PP_FORRO" "PP_VEGETAÇÃO" "PP_GARAGEM" "PP_PROJEÇÃO" "PP_LAYOUT"
+                   "PP_ARQUITETURA" "PP_VIGA" "PP_PILAR" "PP_TEXTO" "PP_REGIÃO")
+    (if (setq selection (ssget "_X" (list (cons 8 layer) (cons 410 (getvar "CTAB")))))
+      (progn (vl-cmdf "_.DRAWORDER" selection "" "_Front") (setq *chlay-changed* T))))
+  (prompt "\n[ORGL] Ordem das layers organizada no layout atual.") T)
+(defun c:ORGL () (chlay:with-operation 'chlay:order-body nil nil) (princ))
+
+
+(defun c:CHL (/ ss lay_name) 
+  (setq ss (ssget "_I"))
+  (setq lay_name (getstring T "\nDigite o nome da camada de destino: "))
+  (if (not ss) 
+    (progn 
+      (prompt (strcat "\nSelecione os objetos para transferir para " (if (and lay_name (/= lay_name "")) lay_name "a camada") ": "))
+      (setq ss (ssget))
+    )
+  )
+
+  (if (and ss lay_name (/= lay_name "")) 
+    (chlay:apply-layer ss lay_name)
+    (if (not ss)
+      (prompt "\nNenhum objeto selecionado.")
+      (prompt "\nNome de camada inválido.")
+    )
+  )
+  (princ)
+)
+
 (defun c:CHLAUTO (/ ss)
   (setq ss (ssget "_I"))
   (if (not ss)
@@ -1727,764 +1587,6 @@
   (princ)
 )
 
-;; Alias de compatibilidade: Comando LBR executa o CHLAUTO com as mesmas regras unificadas
-(defun c:LBR ()
-  (c:CHLAUTO)
-)
-
-;; Comando turbinado CHLHATCH: fecha polilinhas de pilares, cria novas hachuras onde faltar, e padroniza/deduplica
-(defun c:CHLHATCH (/ ss_user ss_hatches i ent elist ent_type pline_sig 
-                     count_closed count_created count_del old_cmdecho doc
-                     existing_hatch_sigs h_ent h_sig new_hatch
-                  )
-  (vl-load-com)
-  (setq doc (vla-get-activedocument (vlax-get-acad-object)))
-  (vla-StartUndoMark doc)
-  (setq old_cmdecho (getvar "CMDECHO"))
-  (setvar "CMDECHO" 0)
-  (chlay:ensure-all-predefined-layers)
-  
-  (setq count_closed 0)
-  (setq count_created 0)
-  (setq count_del 0)
-  
-  (prompt "\n[CHLHATCH] Selecione os pilares/hachuras (ou ENTER para verificar todo o ModelSpace): ")
-  (setq ss_user (ssget "_I"))
-  (if (not ss_user)
-    (setq ss_user (ssget))
-  )
-  (if (not ss_user)
-    (progn
-      (prompt "\n[CHLHATCH] Processando pilares e hachuras em todo o ModelSpace...")
-      (setq ss_user (ssget "_X" '((410 . "Model"))))
-    )
-  )
-  
-  (if ss_user
-    (progn
-      ;; 1. Mapear todas as hachuras existentes em PP_PILAR
-      (setq existing_hatch_sigs nil)
-      (if (setq ss_hatches (ssget "_X" '((0 . "HATCH") (8 . "PP_PILAR"))))
-        (progn
-          (setq i 0)
-          (while (< i (sslength ss_hatches))
-            (setq h_ent (ssname ss_hatches i))
-            (setq h_sig (chlay:get-hatch-sig h_ent))
-            (if (and h_sig (not (member h_sig existing_hatch_sigs)))
-              (setq existing_hatch_sigs (cons h_sig existing_hatch_sigs))
-            )
-            (setq i (1+ i))
-          )
-        )
-      )
-      
-      ;; 2. Varrer polilinhas em PP_PILAR na seleção para fechar e criar hachuras faltantes
-      (setq i 0)
-      (while (< i (sslength ss_user))
-        (setq ent (ssname ss_user i))
-        (if (and ent (setq elist (entget ent)))
-          (progn
-            (if (= (strcase (cdr (assoc 8 elist))) "PP_PILAR")
-              (progn
-                (setq ent_type (cdr (assoc 0 elist)))
-                (if (member ent_type '("LWPOLYLINE" "POLYLINE"))
-                  (progn
-                    ;; Fechar polilinha se estiver aberta
-                    (if (and (assoc 70 elist) (numberp (cdr (assoc 70 elist))))
-                      (if (= (logand (cdr (assoc 70 elist)) 1) 0)
-                        (progn
-                          (entmod (subst (cons 70 (logior (cdr (assoc 70 elist)) 1)) (assoc 70 elist) elist))
-                          (setq count_closed (1+ count_closed))
-                        )
-                      )
-                    )
-                    ;; Verificar se já possui hachura
-                    (setq pline_sig (chlay:get-pline-sig ent))
-                    (if (and pline_sig (not (member pline_sig existing_hatch_sigs)))
-                      (progn
-                        (setq new_hatch (chlay:create-polyline-hatch ent))
-                        (if (and new_hatch (entget new_hatch) (= (cdr (assoc 0 (entget new_hatch))) "HATCH"))
-                          (progn
-                            (chlay:move-entity new_hatch "PP_PILAR")
-                            (setq existing_hatch_sigs (cons pline_sig existing_hatch_sigs))
-                            (setq count_created (1+ count_created))
-                          )
-                        )
-                      )
-                    )
-                  )
-                )
-              )
-            )
-          )
-        )
-        (setq i (1+ i))
-      )
-      
-      ;; 3. Deduplicar e padronizar hachuras no desenho
-      (setq count_del (chlay:deduplicate-hatches nil))
-    )
-  )
-  
-  (setvar "CMDECHO" old_cmdecho)
-  (vla-EndUndoMark doc)
-  
-  (prompt (strcat "\n[CHLHATCH] Concluído: " 
-                  (itoa count_closed) " polilinha(s) fechada(s), " 
-                  (itoa count_created) " nova(s) hachura(s) de pilar criada(s), " 
-                  (itoa count_del) " hachura(s) sobressalente(s) removida(s)."
-          )
-  )
-  (princ)
-)
-
-;; Função de exclusão pura baseada nas regras de limpeza (CHLDEL)
-(defun chlay:delete-selection (ss / rules_delete rules_map i ent elist ent_lay ent_type 
-                                    count_del count_kept old_cmdecho old_highlight doc
-                                    layer_cache cache_entry action_code act_type u_lay
-                              )
-  (if ss
-    (progn
-      (vl-load-com)
-      (setq doc (vla-get-activedocument (vlax-get-acad-object)))
-      (vla-StartUndoMark doc)
-      (setq old_cmdecho (getvar "CMDECHO"))
-      (setq old_highlight (getvar "HIGHLIGHT"))
-      (setvar "CMDECHO" 0)
-      (if old_highlight (setvar "HIGHLIGHT" 0))
-      (sssetfirst nil nil)
-      
-      ;; 1. Regras de exclusão estritas
-      (setq rules_delete '(
-        ;; --- Camadas Numéricas a serem Excluídas (Projetista Estrutural) ---
-        "225" "228" "218" "209" "207" "215" "230" "214" "237"
-        "170" "213" "217" "245" "223" "204" "171" "224" "248"
-        "226" "206" "242" "2" "70" "67" "63" "62" "66"
-        "69" "65" "247" "5" "61" "235" "243" "251"
-        "68" "197" "60" "220" "71" "161" "160" "64"
-
-        ;; Tags / Identificadores especÃ­ficos a serem apagados
-        "A-DOOR-IDEN" "A-DOOR-____-IDEN"
-        "A-GLAZ-IDEN" "A-GLAZ-____-IDEN"
-        "C-PRKG-IDEN" "C-PRKG-____-IDEN"
-        "Q-CASE-IDEN" "Q-CASE-____-IDEN"
-        "Q-SPCQ-IDEN" "Q-SPCQ-____-IDEN"
-        "S-STRS-IDEN" "S-STRS-____-IDEN"
-
-        ;; Marcadores de Porta e Tags de Janela a serem apagados
-        "*Marcadores de Porta*" "*Marcador*Porta*" "*Marcador*Portas*"
-        "*Marcadores de Janela*" "*Marcador*Janela*" "*Marcador*Janelas*"
-        "*Marcador*" "*Marcadores*"
-        "*TAG _ Porta*" "*TAG _ Portas*" "*TAG*Porta*" "*TAG*Portas*"
-        "*TAG _ Janela*" "*TAG _ Janelas*" "*TAG*Janela*" "*TAG*Janelas*"
-        "*DOOR*IDEN*" "*GLAZ*IDEN*" "*WIND*IDEN*"
-        "*DOOR*TAG*" "*GLAZ*TAG*" "*WIND*TAG*"
-        ;; Dimensões específicas a serem apagadas
-        "A-ANNO-DIMS" "A-ANNO-DIMS*" "A-ANNO-DIMS-75" "A-ANNO-DIMS-200" "A---DIMS-50" "A---DIMS-300"
-
-        ;; Elementos gerais / Carimbos / Tabelas / Símbolos / Eixos
-        "G-IMPT"
-        "S-GRID" "S-GRID-IDEN" "S-GRID-____-IDEN" "S-GRID-____-OTLN" "S-GRID-OTLN" "S-GRID*" "A-GRID*" "*GRID*" "EIXOS" "*EIXO*" "*EIXOS*"
-        "G-ANNO-NPLT"
-        "G-ANNO-TTLB" "G-ANNO-TTLB-MEDM" "G-ANNO-TTLB-WIDE" "G-ANNO-TTLB-THIN"
-        "G-ANNO-SCHD"
-        "G-ANNO-LEGN"
-        "G-ANNO-SYMB" "G-____-____-SYMB"
-        "G-XREF-____-OTLN" "G-XREF*"
-
-        ;; Camadas legadas a serem apagadas
-        "LINHA03"
-        "LINHA 02"
-        "LINHA02"
-        "0L_CALL_DIM"
-        "TEXTO1"
-        "SIMBOLOS"
-        "CORTE"
-        "HACHURAS_MOVEIS"
-        "HACHURAS LOUCAS"
-        "HACHURA LOUCAS"
-        "H-AS-CX"
-        "H-AP-CX"
-        "SETAS"
-        "PISCINA"
-        "TG_Symb"
-        "CARIMBO"
-        "*TAG _ Corte*"
-        "*TAG _ Eleva*"
-      ))
-      
-      ;; 2. Regras de remapeamento
-      (setq rules_map '(
-        ;; --- PP_REGIÃO ---
-        ("*PAVIMENTO TIPO*Guarda*Corpo*91*" . "PP_REGIÃO")
-        ("PAVIMENTO TIPO ( 2º ao 14º )_1_OBJ _ Guarda-Corpo e Corrimão.3D_Caneta_No__91" . "PP_REGIÃO")
-        ("*APTO PCD*ZON _ Ambientes.3D" . "PP_REGIÃO")
-        ("*APTO PCD*ZON _ Ambientes.3D*No__5" . "PP_REGIÃO")
-        ("APTO PCD_3_ZON _ Ambientes.3D" . "PP_REGIÃO")
-        ("APTO PCD_3_ZON _ Ambientes.3D_Caneta_No__5" . "PP_REGIÃO")
-
-        ;; --- PP_TEXTO PILAR (Prioridade máxima sobre regras de pilares) ---
-        ("NOMEPILAR" . "PP_TEXTO PILAR")
-        ("229" . "PP_TEXTO PILAR")
-        ("S-COLS-____-IDEN" . "PP_TEXTO PILAR")
-        ("S-COLS-IDEN" . "PP_TEXTO PILAR")
-        ("*COLS*IDEN*" . "PP_TEXTO PILAR")
-        ("*TEXTO PILAR*" . "PP_TEXTO PILAR")
-
-        ;; --- PP_TEXTO VIGA (Prioridade máxima sobre regras de vigas) ---
-        ("234" . "PP_TEXTO VIGA")
-        ("227" . "PP_TEXTO VIGA")
-        ("*BEAM*IDEN*" . "PP_TEXTO VIGA")
-        ("*VIGA*IDEN*" . "PP_TEXTO VIGA")
-        ("*TEXTO VIGA*" . "PP_TEXTO VIGA")
-
-        ;; --- PP_TEXTO APOIO ---
-        ("*ZON _ Ambiente*" . "PP_TEXTO APOIO")
-        ("*ZON _ *reas e Per*metros*" . "PP_TEXTO APOIO")
-        ("*TXT _ Legal*" . "PP_TEXTO APOIO")
-        ("*TXT _ Matr*cula*" . "PP_TEXTO APOIO")
-        ("*LEG _ Legenda*" . "PP_TEXTO APOIO")
-        ("*TAG _ Shaft*" . "PP_TEXTO APOIO")
-        ("*TAG*Shaft*" . "PP_TEXTO APOIO")
-        ("*TAG _ *" . "PP_TEXTO APOIO")
-        ("*TAG*" . "PP_TEXTO APOIO")
-        ("G-ANNO-TEXT" . "PP_TEXTO APOIO")
-        ("A-ANNO-NOTE" . "PP_TEXTO APOIO")
-        ("A-____-NOTE-TEXT" . "PP_TEXTO APOIO")
-        ("A-FLOR-LEVL" . "PP_TEXTO APOIO")
-        ("S-STRS-ANNO" . "PP_TEXTO APOIO")
-        ("TEXTO" . "PP_TEXTO APOIO")
-        ("TEXTO2" . "PP_TEXTO APOIO")
-        ("COMENTÁRIOS" . "PP_TEXTO APOIO")
-        ("COMENTARIOS" . "PP_TEXTO APOIO")
-        ("*LINHA_DE_CHAMADA*" . "PP_TEXTO APOIO")
-        ("*ANNO-TEXT*" . "PP_TEXTO APOIO")
-        ("*TEXTO APOIO*" . "PP_TEXTO APOIO")
-        ("*COMENT*" . "PP_TEXTO APOIO")
-        ("*NOTE*" . "PP_TEXTO APOIO")
-        ("*LEVL*" . "PP_TEXTO APOIO")
-        ("*NIVEL*" . "PP_TEXTO APOIO")
-
-        ;; --- PP_TEXTO ---
-        ("*Selos de Zona*" . "PP_TEXTO")
-        ("A-AREA-IDEN" . "PP_TEXTO")
-        ("A-AREA-____-IDEN" . "PP_TEXTO")
-        ("G-____-____-TEXT" . "PP_TEXTO")
-        ("*AREA-IDEN*" . "PP_TEXTO")
-        ("*AREA*IDEN*" . "PP_TEXTO")
-        ("*LEGENDA*" . "PP_TEXTO")
-        ("*LEG*" . "PP_TEXTO")
-        ("*TEXTO*" . "PP_TEXTO")
-        ("*TXT*" . "PP_TEXTO")
-        ("*DOC _ Textos e Rótulos*" . "PP_TEXTO")
-        ("*DOC _ Textos e R*tulos*" . "PP_TEXTO")
-
-        ;; --- PP_COTAS ---
-        ("*CTA _ N*vel*" . "PP_COTAS")
-        ("*CTA*" . "PP_COTAS")
-        ("G-ANNO-DIMS" . "PP_COTAS")
-        ("G-____-____-DIMS" . "PP_COTAS")
-        ("A---DIMS" . "PP_COTAS")
-        ("COTAS" . "PP_COTAS")
-        ("*DIMS*" . "PP_COTAS")
-        ("*COTA*" . "PP_COTAS")
-        ("*COTAS*" . "PP_COTAS")
-        ("*DOC _ Cotas*" . "PP_COTAS")
-
-        ;; --- PP_PROJEÇÃO (ArchiCAD Shafts com prioridade sobre regras gerais) ---
-        ("*OBJ _ Shafts e Vazios*" . "PP_PROJEÇÃO")
-        ("*SFT _ Shaft*" . "PP_PROJEÇÃO")
-        ("*SFT*" . "PP_PROJEÇÃO")
-        ("*2D _ Proje*" . "PP_PROJEÇÃO")
-
-        ;; --- PP_LAYOUT (Prioritários antes de Alvenaria) ---
-        ("*Pele de Vidro*" . "PP_LAYOUT")
-        ("*VED _ Pele de Vidro*" . "PP_LAYOUT")
-
-        ;; --- PP_ARQUITETURA ---
-        ("A-WALL" . "PP_ARQUITETURA")
-        ("A-WALL-____-MCUT" . "PP_ARQUITETURA")
-        ("A-WALL-____-OTLN" . "PP_ARQUITETURA")
-        ("A-WALL-____-PATT" . "PP_ARQUITETURA")
-        ("A-WALL-PATT" . "PP_ARQUITETURA")
-        ("ALVENARIA" . "PP_ARQUITETURA")
-        ("*VED _ Paredes de Alvenaria*" . "PP_ARQUITETURA")
-        ("*VED _ Drywall*" . "PP_ARQUITETURA")
-        ("*ALV _ Parede*" . "PP_ARQUITETURA")
-        ("*ALV _ Garden*" . "PP_ARQUITETURA")
-        ("*Parede baixa*" . "PP_ARQUITETURA")
-        ("*Mureta*" . "PP_ARQUITETURA")
-        ("*ACB _ Parede*" . "PP_ARQUITETURA")
-        ("ENCHIMENTO" . "PP_ARQUITETURA")
-        ("ACABAMENTO" . "PP_ARQUITETURA")
-        ("ALV-LAJE" . "PP_ARQUITETURA")
-        ("ALV-VIGA" . "PP_ARQUITETURA")
-        ("$0$ALVENARIA" . "PP_ARQUITETURA")
-        ("*WALL*" . "PP_ARQUITETURA")
-        ("*ALVENARIA*" . "PP_ARQUITETURA")
-        ("*ALV*" . "PP_ARQUITETURA")
-        ("*PAREDE*" . "PP_ARQUITETURA")
-        ("*REVESTIMENTO*" . "PP_ARQUITETURA")
-        ("*REV*" . "PP_ARQUITETURA")
-        ("*PEDRA*" . "PP_ARQUITETURA")
-        ("*SHAFT*" . "PP_ARQUITETURA")
-        ("*FACHADA*" . "PP_ARQUITETURA")
-
-        ;; --- PP_PILAR ---
-        ("*PIL _ Pilar*" . "PP_PILAR")
-        ("*PIL*" . "PP_PILAR")
-        ("S-COLS" . "PP_PILAR")
-        ("S-COLS-____-MCUT" . "PP_PILAR")
-        ("S-COLS-____-OTLN" . "PP_PILAR")
-        ("ESTRUTURA-1" . "PP_PILAR")
-        ("ESTRUTURA-3" . "PP_PILAR")
-        ("240" . "PP_PILAR")
-        ("*240*" . "PP_PILAR")
-        ("232" . "PP_PILAR")
-        ("233" . "PP_PILAR")
-        ("*COLS*" . "PP_PILAR")
-        ("*PILAR*" . "PP_PILAR")
-        ("*COLUNA*" . "PP_PILAR")
-        ("*BLOC*" . "PP_PILAR")
-
-        ;; --- PP_VIGA ---
-        ("S-BEAM" . "PP_VIGA")
-        ("S-BEAM-____-MCUT" . "PP_VIGA")
-        ("S-BEAM-____-OTLN" . "PP_VIGA")
-        ("250" . "PP_VIGA")
-        ("4" . "PP_VIGA")
-        ("25" . "PP_VIGA")
-        ("*BEAM*" . "PP_VIGA")
-        ("*VIGA*" . "PP_VIGA")
-        ("*VIG*" . "PP_VIGA")
-        ("*EST _ Viga*" . "PP_VIGA")
-
-        ;; --- PP_CUBETA ---
-        ("200" . "PP_CUBETA")
-        ("210" . "PP_CUBETA")
-        ("*200*" . "PP_CUBETA")
-        ("*210*" . "PP_CUBETA")
-        ("*CUBETA*" . "PP_CUBETA")
-        ("*NERVURA*" . "PP_CUBETA")
-        ("A-CLNG" . "PP_FORRO")
-        ("A-CLNG-PATT" . "PP_FORRO")
-        ("A-DETL-GENF-OTLN" . "PP_FORRO")
-        ("A-DETL-DEMO-OTLN" . "PP_FORRO")
-        ("FORRO" . "PP_FORRO")
-        ("*CLNG*" . "PP_FORRO")
-        ("*FOR-HTC*" . "PP_FORRO")
-        ("*FORRO*" . "PP_FORRO")
-        ("*FOR-*" . "PP_FORRO")
-        ("*FOR_*" . "PP_FORRO")
-        ("*ACB _ Forro*" . "PP_FORRO")
-        ;; --- PP_COBERTURA ---
-        ("*COB _ Pergolado*" . "PP_COBERTURA")
-        ("*Pergolado*" . "PP_COBERTURA")
-        ("*COB*" . "PP_COBERTURA")
-        ("A-ROOF" . "PP_COBERTURA")
-        ("A-ROOF-OTLN" . "PP_COBERTURA")
-        ("A-ROOF-PATT" . "PP_COBERTURA")
-        ("A-ROOF-MCUT" . "PP_COBERTURA")
-        ("A-ROOF-____-MCUT" . "PP_COBERTURA")
-        ("A-ROOF-____-OTLN" . "PP_COBERTURA")
-        ("A-ROOF-____-PATT" . "PP_COBERTURA")
-        ("*ROOF*" . "PP_COBERTURA")
-        ("*COBERTURA*" . "PP_COBERTURA")
-        ("*COBERT*" . "PP_COBERTURA")
-        ("*TELHA*" . "PP_COBERTURA")
-        ("*TELHO*" . "PP_COBERTURA")
-
-        ;; --- PP_GARAGEM ---
-        ("*Estacionamento*" . "PP_GARAGEM")
-        ("*Manobra*" . "PP_GARAGEM")
-        ("*OBJ _ Vaga*" . "PP_GARAGEM")
-        ("C-PRKG" . "PP_GARAGEM")
-        ("C-PRKG-____-OTLN" . "PP_GARAGEM")
-        ("A-DETL-MBND" . "PP_GARAGEM")
-        ("A-DETL-____-MBND" . "PP_GARAGEM")
-        ("*DETL*MBND*" . "PP_GARAGEM")
-        ("VAGAS" . "PP_GARAGEM")
-        ("HACHURA" . "PP_GARAGEM")
-        ("*PRKG*" . "PP_GARAGEM")
-        ("*VAGA*" . "PP_GARAGEM")
-        ("*VAGAS*" . "PP_GARAGEM")
-        ("*GARAGEM*" . "PP_GARAGEM")
-        ("*GARAG*" . "PP_GARAGEM")
-
-        ;; --- PP_VEGETAÇÃO ---
-        ("*2D _ *rea - Verde*" . "PP_VEGETAÇÃO")
-        ("*Perme*vel*" . "PP_VEGETAÇÃO")
-        ("*VEG _ Grama*" . "PP_VEGETAÇÃO")
-        ("*Grama*" . "PP_VEGETAÇÃO")
-        ("L-PLNT" . "PP_VEGETAÇÃO")
-        ("L-PLNT-____-OTLN" . "PP_VEGETAÇÃO")
-        ("L-SITE" . "PP_VEGETAÇÃO")
-        ("L-SITE-____-OTLN" . "PP_VEGETAÇÃO")
-        ("TERRA" . "PP_VEGETAÇÃO")
-        ("FORRAÇÃO" . "PP_VEGETAÇÃO")
-        ("FORRACAO" . "PP_VEGETAÇÃO")
-        ("*PLNT*" . "PP_VEGETAÇÃO")
-        ("*SITE*" . "PP_VEGETAÇÃO")
-        ("*VEGETAÇÃO*" . "PP_VEGETAÇÃO")
-        ("*VEGETACAO*" . "PP_VEGETAÇÃO")
-        ("*VEGETA*" . "PP_VEGETAÇÃO")
-        ("*VEG*" . "PP_VEGETAÇÃO")
-        ("*JARDIM*" . "PP_VEGETAÇÃO")
-        ("*FORRAÇÃO*" . "PP_VEGETAÇÃO")
-        ("*FORRACAO*" . "PP_VEGETAÇÃO")
-        ("*PAI _ Paisagismo*" . "PP_VEGETAÇÃO")
-        ("A-DETL-DEMO" . "PP_PROJEÇÃO")
-        ("A-FLOR-OVHD" . "PP_PROJEÇÃO")
-        ("A-FLOR-____-OVHD" . "PP_PROJEÇÃO")
-        ("_Acima_ Linha de corte do corrimão" . "PP_PROJEÇÃO")
-        ("Acima Linha de corte do corrimão" . "PP_PROJEÇÃO")
-        ("*ACIMA*" . "PP_PROJEÇÃO")
-        ("*LINHA DE CORTE DO CORRIM*" . "PP_PROJEÇÃO")
-        ("*LINHA DE CORTE*" . "PP_PROJEÇÃO")
-        ("PROJEÇÕES" . "PP_PROJEÇÃO")
-        ("PROJEÇÃO" . "PP_PROJEÇÃO")
-        ("PROJECAO" . "PP_PROJEÇÃO")
-        ("PROJECOES" . "PP_PROJEÇÃO")
-        ("211" . "PP_PROJEÇÃO")
-        ("*OVHD*" . "PP_PROJEÇÃO")
-        ("*DEMO*" . "PP_PROJEÇÃO")
-        ("*PROJEÇÃO*" . "PP_PROJEÇÃO")
-        ("*PROJECAO*" . "PP_PROJEÇÃO")
-        ("*PROJEC*" . "PP_PROJEÇÃO")
-        ("E-ELEC-EQPM" . "PP_EQUIPAMENTO")
-        ("E-ELEC-EQPM-OTLN" . "PP_EQUIPAMENTO")
-        ("E-ELEC-FIXT" . "PP_EQUIPAMENTO")
-        ("M-EQPM" . "PP_EQUIPAMENTO")
-        ("M-EQPM-____-OTLN" . "PP_EQUIPAMENTO")
-        ("P-PIPE" . "PP_EQUIPAMENTO")
-        ("PP_FRIGORIFICA_EQUIPAMENTOS" . "PP_EQUIPAMENTO")
-        ("PP_EXAUSTÃO_EQUIP" . "PP_EQUIPAMENTO")
-        ("PP_EXAUSTÃO_DUTO" . "PP_EQUIPAMENTO")
-        ("PP_FRIGORIFICA" . "PP_EQUIPAMENTO")
-        ("H-TC-CX" . "PP_EQUIPAMENTO")
-        ("H-AF-CX" . "PP_EQUIPAMENTO")
-        ("H-INC-CX" . "PP_EQUIPAMENTO")
-        ("QUADROS" . "PP_EQUIPAMENTO")
-        ("LINHA01" . "PP_EQUIPAMENTO")
-        ("CP-DIFUSÃO" . "PP_EQUIPAMENTO")
-        ("TigreCad" . "PP_EQUIPAMENTO")
-        ("Tinterno" . "PP_EQUIPAMENTO")
-        ("*EQPM*" . "PP_EQUIPAMENTO")
-        ("*ELEC*" . "PP_EQUIPAMENTO")
-        ("*ELETRIC*" . "PP_EQUIPAMENTO")
-        ("*PIPE*" . "PP_EQUIPAMENTO")
-        ("*DUTO*" . "PP_EQUIPAMENTO")
-        ("*EXAUST*" . "PP_EQUIPAMENTO")
-        ("*FRIGORIF*" . "PP_EQUIPAMENTO")
-        ("*TUB*" . "PP_EQUIPAMENTO")
-        ("*HIDR*" . "PP_EQUIPAMENTO")
-        ("*EQP*" . "PP_EQUIPAMENTO")
-        ;; --- Reservatórios, Caixas Elétricas, Barriletes, Bombas e Passagens ---
-        ("*RESERV*" . "PP_EQUIPAMENTO")
-        ("*CISTERNA*" . "PP_EQUIPAMENTO")
-        ("*BARRILETE*" . "PP_EQUIPAMENTO")
-        ("*CAIXA*AGUA*" . "PP_EQUIPAMENTO")
-        ("*CAIXA*ÁGUA*" . "PP_EQUIPAMENTO")
-        ("*CX*AGUA*" . "PP_EQUIPAMENTO")
-        ("*CX*ÁGUA*" . "PP_EQUIPAMENTO")
-        ("*CAIXA*ELET*" . "PP_EQUIPAMENTO")
-        ("*CX*ELET*" . "PP_EQUIPAMENTO")
-        ("*QUADRO*ELET*" . "PP_EQUIPAMENTO")
-        ("*QD*ELET*" . "PP_EQUIPAMENTO")
-        ("*CAIXA*PASSAGEM*" . "PP_EQUIPAMENTO")
-        ("*CX*PASSAGEM*" . "PP_EQUIPAMENTO")
-        ("*PASSAGEM*" . "PP_EQUIPAMENTO")
-        ("*INSPEC*" . "PP_EQUIPAMENTO")
-        ("*BOMBA*" . "PP_EQUIPAMENTO")
-        ("0" . "PP_LAYOUT")
-        ("C-TOPO" . "PP_LAYOUT")
-        ("C-TOPO-PATT" . "PP_LAYOUT")
-        ("C-TOPO-MCUT" . "PP_LAYOUT")
-        ("*TOPO*" . "PP_LAYOUT")
-        ("C-PROP-LINE" . "PP_LAYOUT")
-        ("C-PROP-LINE-OTLN" . "PP_LAYOUT")
-        ("*PROP-LINE*" . "PP_LAYOUT")
-        ("*DIVISA*" . "PP_LAYOUT")
-        ("A-FLOR" . "PP_LAYOUT")
-        ("A-FLOR-MCUT" . "PP_LAYOUT")
-        ("A-FLOR-PATT" . "PP_LAYOUT")
-        ("A-FLOR-____-MCUT" . "PP_LAYOUT")
-        ("A-FLOR-____-OTLN" . "PP_LAYOUT")
-        ("PISO" . "PP_LAYOUT")
-        ("PISO-1" . "PP_LAYOUT")
-        ("*FLOR*" . "PP_LAYOUT")
-        ("*FLOOR*" . "PP_LAYOUT")
-        ("*PISO*" . "PP_LAYOUT")
-        ("A-DOOR" . "PP_LAYOUT")
-        ("A-DOOR-FRAM" . "PP_LAYOUT")
-        ("A-DOOR-FRAM-MCUT" . "PP_LAYOUT")
-        ("A-DOOR-FRAM-OTLN" . "PP_LAYOUT")
-        ("A-DOOR-GLAZ-MCUT" . "PP_LAYOUT")
-        ("A-DOOR-HDLN" . "PP_LAYOUT")
-        ("A-DOOR-____-HDLN" . "PP_LAYOUT")
-        ("A-DOOR-____-MCUT" . "PP_LAYOUT")
-        ("A-DOOR-____-OTLN" . "PP_LAYOUT")
-        ("PORTAS" . "PP_LAYOUT")
-        ("*DOOR*" . "PP_LAYOUT")
-        ("*PORTA*" . "PP_LAYOUT")
-        ("A-GLAZ" . "PP_LAYOUT")
-        ("A-GLAZ-CURT" . "PP_LAYOUT")
-        ("A-GLAZ-CWMG" . "PP_LAYOUT")
-        ("A-GLAZ-CWMG-OTLN" . "PP_LAYOUT")
-        ("A-GLAZ-____-OTLN" . "PP_LAYOUT")
-        ("A-GLAZ-____-MCUT" . "PP_LAYOUT")
-        ("CAIXILHOS" . "PP_LAYOUT")
-        ("*GLAZ*" . "PP_LAYOUT")
-        ("*JANELA*" . "PP_LAYOUT")
-        ("*ESQUADRIA*" . "PP_LAYOUT")
-        ("*VIDRO*" . "PP_LAYOUT")
-        ("*CAIXILHO*" . "PP_LAYOUT")
-        ("Q-CASE" . "PP_LAYOUT")
-        ("Q-CASE-____-OTLN" . "PP_LAYOUT")
-        ("*CASE*" . "PP_LAYOUT")
-        ("*ARMARIO*" . "PP_LAYOUT")
-        ("*MARCENARIA*" . "PP_LAYOUT")
-        ("P-SANR-FIXT" . "PP_LAYOUT")
-        ("P-SANR-FIXT-HDLN" . "PP_LAYOUT")
-        ("P-SANR-FIXT-OTLN" . "PP_LAYOUT")
-        ("LOUCAS" . "PP_LAYOUT")
-        ("*SANR*" . "PP_LAYOUT")
-        ("*LOUCA*" . "PP_LAYOUT")
-        ("*LOUÇA*" . "PP_LAYOUT")
-        ("*FIXT*" . "PP_LAYOUT")
-        ("A-MEDQ" . "PP_LAYOUT")
-        ("A-MEDQ-____-OTLN" . "PP_LAYOUT")
-        ("*MEDQ*" . "PP_LAYOUT")
-        ("A-FDSQ" . "PP_LAYOUT")
-        ("*FDSQ*" . "PP_LAYOUT")
-        ("A-GENM" . "PP_LAYOUT")
-        ("A-GENM-____-OTLN" . "PP_LAYOUT")
-        ("A-GENM-____-HDLN" . "PP_LAYOUT")
-        ("*GENM*" . "PP_LAYOUT")
-        ("Q-SPCQ" . "PP_LAYOUT")
-        ("Q-SPCQ-____-OTLN" . "PP_LAYOUT")
-        ("*SPCQ*" . "PP_LAYOUT")
-        ("S-STRS" . "PP_LAYOUT")
-        ("S-STRS-MBND" . "PP_LAYOUT")
-        ("S-STRS-____-MBND" . "PP_LAYOUT")
-        ("S-STRS-____-OTLN" . "PP_LAYOUT")
-        ("Guarda-corpos" . "PP_LAYOUT")
-        ("Balaústres" . "PP_LAYOUT")
-        ("Corrimão" . "PP_LAYOUT")
-        ("*STRS*" . "PP_LAYOUT")
-        ("*ESCADA*" . "PP_LAYOUT")
-        ("*CORRIM*" . "PP_LAYOUT")
-        ("*BALAUST*" . "PP_LAYOUT")
-        ("*GUARDA*" . "PP_LAYOUT")
-        ("A-DETL" . "PP_LAYOUT")
-        ("A-DETL-THIN" . "PP_LAYOUT")
-        ("A-DETL-MEDM" . "PP_LAYOUT")
-        ("A-DETL-____-MEDM" . "PP_LAYOUT")
-        ("A-DETL-____-OTLN" . "PP_LAYOUT")
-        ("A-DETL-____-THIN" . "PP_LAYOUT")
-        ("*DETL*" . "PP_LAYOUT")
-        ("I-FURN" . "PP_LAYOUT")
-        ("I-FURN-____-OTLN" . "PP_LAYOUT")
-        ("MÓVEIS" . "PP_LAYOUT")
-        ("MOVEIS" . "PP_LAYOUT")
-        ("*FURN*" . "PP_LAYOUT")
-        ("*MOB*" . "PP_LAYOUT")
-        ("LINHA015" . "PP_LAYOUT")
-        ("LINHA025" . "PP_LAYOUT")
-        ("LINHA 01" . "PP_LAYOUT")
-        ("H-INC-TB" . "PP_LAYOUT")
-        ("BLOCO" . "PP_LAYOUT")
-        ("E-NURS" . "PP_LAYOUT")
-        ("E-NURS-____-OTLN" . "PP_LAYOUT")
-        ("E-NURS*" . "PP_LAYOUT")
-        ("*NURS*" . "PP_LAYOUT")
-        ("L-HRDS" . "PP_LAYOUT")
-        ("L-HRDS-____-OTLN" . "PP_LAYOUT")
-        ("L-HRDS-____-PATT" . "PP_LAYOUT")
-        ("L-HRDS-PATT" . "PP_LAYOUT")
-        ("L-HRDS*" . "PP_LAYOUT")
-        ("*HRDS*" . "PP_LAYOUT")
-        ;; --- ArchiCAD Layout ---
-        ("0_Caneta_No__*" . "PP_LAYOUT")
-        ("*LAJ _ Laje*" . "PP_LAYOUT")
-        ("*LAJ*" . "PP_LAYOUT")
-        ("*RMP _ Rampa*" . "PP_LAYOUT")
-        ("*RMP*" . "PP_LAYOUT")
-        ("*ESC _ Escada*" . "PP_LAYOUT")
-        ("*ESQ _ Gradil*" . "PP_LAYOUT")
-        ("*ESQ _ Guarda-corpo*" . "PP_LAYOUT")
-        ("*ESQ*" . "PP_LAYOUT")
-        ("*GRADIL*" . "PP_LAYOUT")
-        ("*MOB _ PcD*" . "PP_LAYOUT")
-        ("*SMB _ PcD*" . "PP_LAYOUT")
-        ("*SMB*" . "PP_LAYOUT")
-        ("*OBJ _ Elevador*" . "PP_LAYOUT")
-        ("*OBJ _ Lixo*" . "PP_LAYOUT")
-        ("*OBJ _ Churrasqueira*" . "PP_LAYOUT")
-        ("*OBJ*" . "PP_LAYOUT")
-        ("*PAV _ Guia*" . "PP_LAYOUT")
-        ("*Sarjeta*" . "PP_LAYOUT")
-        ("*PAV*" . "PP_LAYOUT")
-        ("*EFS _ Lou*a*" . "PP_LAYOUT")
-        ("*EFS _ Metal*" . "PP_LAYOUT")
-        ("*EFS*" . "PP_LAYOUT")
-        ("*PDR _ Peitoril*" . "PP_LAYOUT")
-        ("*PDR _ Bancada*" . "PP_LAYOUT")
-        ("*PDR _ Soleira*" . "PP_LAYOUT")
-        ("*PDR _ Filete*" . "PP_LAYOUT")
-        ("*PDR _ Borda de piscina*" . "PP_LAYOUT")
-        ("*PDR*" . "PP_LAYOUT")
-        ("*2D _ Cal*ada*" . "PP_LAYOUT")
-        ("*2D _ Recuo*" . "PP_LAYOUT")
-        ("*2D _ Espa*o m*nimo*" . "PP_LAYOUT")
-        ("*CMP _ Planialti*" . "PP_LAYOUT")
-        ("*Janelas Archicad*" . "PP_LAYOUT")
-        ("*Portas Archicad*" . "PP_LAYOUT")
-        ("*OBJ _ Eletrodom*" . "PP_LAYOUT")
-        ("*OBJ _ Mobili*" . "PP_LAYOUT")
-        ("*PED _ Bancadas*" . "PP_LAYOUT")
-        ("*OBJ _ Lou*as e Metais*" . "PP_LAYOUT")
-        ("*OBJ _ Elevadores e plataformas*" . "PP_LAYOUT")
-        ("*EST _ Escadas e Rampas*" . "PP_LAYOUT")
-        ("*OBJ _ Guarda-Corpo e Corrim*" . "PP_LAYOUT")
-        ("*PAGINA*" . "PP_LAYOUT")
-        ("*LAYOUT*" . "PP_LAYOUT")
-      ))
-
-      (setq count_del 0)
-      (setq count_kept 0)
-      (setq layer_cache nil)
-      (setq i 0)
-      
-      (while (< i (sslength ss))
-        (setq ent (ssname ss i))
-        (if (and ent (setq elist (entget ent)))
-          (progn
-            (setq ent_lay (cdr (assoc 8 elist)))
-            (setq ent_type (cdr (assoc 0 elist)))
-            (setq u_lay (strcase ent_lay))
-            
-            ;; Consulta rÃ¡pida no cache de decisÃµes de camada (O(1))
-            (setq cache_entry (assoc u_lay layer_cache))
-            (if (not cache_entry)
-              (progn
-                (setq cache_entry (cons u_lay (chlay:resolve-layer-action ent_lay rules_delete rules_map)))
-                (setq layer_cache (cons cache_entry layer_cache))
-              )
-            )
-            (setq action_code (cdr cache_entry))
-            (setq act_type (car action_code))
-            
-            ;; Execução direta da ação de exclusão
-            (cond
-              ;; Exclusão direta da entidade
-              ((= act_type "DELETE")
-               (entdel ent)
-               (setq count_del (1+ count_del))
-              )
-
-              ;; Condicional Mobiliário: hachura apaga
-              ((= act_type "COND_FURN")
-               (if (= ent_type "HATCH")
-                 (progn
-                   (entdel ent)
-                   (setq count_del (1+ count_del))
-                 )
-                 (setq count_kept (1+ count_kept))
-               )
-              )
-
-              ;; Condicional TEXTO3: TEXT simples apaga
-              ((= act_type "COND_TEXTO3")
-               (if (= ent_type "TEXT")
-                 (progn
-                   (entdel ent)
-                   (setq count_del (1+ count_del))
-                 )
-                 (setq count_kept (1+ count_kept))
-               )
-              )
-
-              ;; Condicional VAZIO: hachura apaga
-              ((= act_type "COND_VAZIO")
-               (if (= ent_type "HATCH")
-                 (progn
-                   (entdel ent)
-                   (setq count_del (1+ count_del))
-                 )
-                 (setq count_kept (1+ count_kept))
-               )
-              )
-
-              ;; Condicional MBND (Vagas de Garagem): hachura e texto apagam
-              ((= act_type "COND_MBND")
-               (if (or (= ent_type "HATCH")
-                       (member ent_type '("TEXT" "MTEXT" "MULTILEADER" "LEADER")))
-                 (progn
-                   (entdel ent)
-                   (setq count_del (1+ count_del))
-                 )
-                 (setq count_kept (1+ count_kept))
-               )
-              )
-
-              ;; Condicional Selos de Zona ou Zonas: linhas/polilinhas/hachuras apagam, textos/blocos mantidos
-              ((or (= act_type "COND_ZON_TEXT") (= act_type "COND_ZON_APOIO"))
-               (if (member ent_type '("TEXT" "MTEXT" "INSERT" "MULTILEADER" "LEADER"))
-                 (setq count_kept (1+ count_kept))
-                 (progn
-                   (entdel ent)
-                   (setq count_del (1+ count_del))
-                 )
-               )
-              )
-
-              ;; Hachura ou Texto destinado a PP_GARAGEM: apaga se nÃ£o for nativo
-              ((and (= act_type "MOVE")
-                    (= (strcase (cdr action_code)) "PP_GARAGEM")
-                    (or (= ent_type "HATCH")
-                        (member ent_type '("TEXT" "MTEXT" "MULTILEADER" "LEADER")))
-                    (/= (strcase ent_lay) "PP_GARAGEM"))
-               (entdel ent)
-               (setq count_del (1+ count_del))
-              )
-
-              ;; Hachura destinada a PP_LAYOUT: apaga se nÃ£o for nativa
-              ((and (= act_type "MOVE")
-                    (= (strcase (cdr action_code)) "PP_LAYOUT")
-                    (= ent_type "HATCH")
-                    (/= (strcase ent_lay) "PP_LAYOUT"))
-               (entdel ent)
-               (setq count_del (1+ count_del))
-              )
-
-              ;; Demais elementos mantidos intactos
-              (t
-               (setq count_kept (1+ count_kept))
-              )
-            )
-          )
-        )
-        (setq i (1+ i))
-      )
-      
-      (vl-catch-all-apply '(lambda () (vla-regen doc acActiveViewport)))
-      (if old_highlight (setvar "HIGHLIGHT" old_highlight))
-      (if old_cmdecho (setvar "CMDECHO" old_cmdecho))
-      (vla-EndUndoMark doc)
-      
-      (prompt (strcat "\n[CHLDEL] Exclusão concluída: " 
-                      (itoa count_del) " objeto(s) excluído(s), " 
-                      (itoa count_kept) " mantido(s)."
-              )
-      )
-    )
-  )
-  (princ)
-)
-
-;; Comando CHLDEL: executa apenas a exclusão dos elementos conforme as regras (sem alterar camadas)
-;; Otimizado para fluxo rápido (Comando -> Seleção -> Enter), sem sobrecarga de GRIPS ou verificação de layers
 (defun c:CHLDEL (/ ss)
   ;; 1. Desarmar grips ou seleções prévias residuais imediatamente
   (sssetfirst nil nil)
@@ -2503,60 +1605,7 @@
   (princ)
 )
 
-;; Atalhos rápidos para exclusão
-(defun c:CDEL ()
-  (c:CHLDEL)
-)
-(defun c:CD ()
-  (c:CHLDEL)
-)
-
-;; Comando PPLAYERS: restaura e reafirma as propriedades de todas as camadas do padrão PP
-(defun c:PPLAYERS ()
-  (chlay:ensure-all-predefined-layers)
-  (prompt "\n[PPLAYERS] Todas as camadas do padrão PP foram restauradas e padronizadas com sucesso (Cores, Linetypes e Plottability).")
-  (princ)
-)
-
-;; Alias de compatibilidade
-(defun c:PPRESET ()
-  (c:PPLAYERS)
-)
-
-;; Comando auxiliar para rodar OVERKILL / Purge rápido em todo o desenho antes ou depois do CHLAUTO
-(defun c:CHOVERKILL (/ old_cmdecho)
-  (setq old_cmdecho (getvar "CMDECHO"))
-  (setvar "CMDECHO" 0)
-  (chlay:ensure-all-predefined-layers)
-  (prompt "\n[CHOVERKILL] Executando limpeza de objetos sobrepostos (OVERKILL no ModelSpace)...")
-  (vl-cmdf "._-OVERKILL" "_ALL" "" "")
-  (setvar "CMDECHO" old_cmdecho)
-  (prompt "\n[CHOVERKILL] Limpeza de sobreposições concluída.")
-  (princ)
-)
-
-;; Comando ORGL: Organiza a "Draw Order" das layers padrão, definindo a prioridade
-(defun c:ORGL (/ cmd_old layers_para_frente ss) 
-  (setq cmd_old (getvar "CMDECHO"))
-  (setvar "CMDECHO" 0)
-
-  (setq layers_para_frente (list "PP_FORRO" "PP_VEGETAÇÃO" "PP_GARAGEM" "PP_PROJEÇÃO" 
-                                 "PP_LAYOUT" "PP_ARQUITETURA" "PP_VIGA" "PP_PILAR" 
-                                 "PP_TEXTO" "PP_REGIÃO"
-                            )
-  )
-
-  (foreach lay layers_para_frente 
-    (if (setq ss (ssget "X" (list (cons 8 lay)))) 
-      (vl-cmdf "_.draworder" ss "" "_Front")
-    )
-  )
-
-  (setvar "CMDECHO" cmd_old)
-  (princ "\n[ORGL] Ordem das layers organizada com sucesso.")
-  (princ)
-)
-
-(princ "\n[BB_CHLAY] Carregado com sucesso. Comandos disponíveis: CHL, CHLDEL, CHLAUTO, LBR, CHLHATCH, PPLAYERS, CHOVERKILL, ORGL.")
+(setq *chlay-canonical-cache* nil *chlay-verified-layers* nil)
+(chlay:compile-rules)
+(princ "\n[PP_CHLAY] Carregado. Comandos: CHL, CHLDEL, CHLAUTO, LBR, CHLHATCH, PPLAYERS, CHOVERKILL, ORGL.")
 (princ)
-
