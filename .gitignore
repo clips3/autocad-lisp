@@ -3,3 +3,5 @@
 *.dwl2
 *.sv$
 *.tmp
+tests/pp_chlay/runs/
+__pycache__/
